@@ -46,3 +46,6 @@ coverage/
 
 # Runtime data (json-store 生成的配置 json)
 data/
+
+# Vite build cache temp files
+*.timestamp-*.mjs
