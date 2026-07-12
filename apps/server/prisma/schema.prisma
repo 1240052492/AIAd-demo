@@ -129,6 +129,7 @@ model Asset {
   id            String   @id @default(cuid())
   userId        String?
   projectId     String?
+  generationJobId String? @map("generation_job_id")
   type          String   // upload_environment, generated_design, composited_preview, export_png, export_pdf, export_svg
   storageKey    String   @map("storage_key")
   url           String
@@ -143,7 +144,21 @@ model Asset {
   project       Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
   templates     Template[] @relation("TemplateCover")
 
+  @@index([generationJobId])
   @@map("assets")
+}
+
+// ============================================
+// 系统设置（键值存储，value 为 JSON 字符串）
+// ============================================
+
+model SystemSetting {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     String
+  updatedAt DateTime @updatedAt
+
+  @@map("system_settings")
 }
 
 // ============================================

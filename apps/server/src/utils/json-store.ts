@@ -1,3 +1,5 @@
+/* DEPRECATED: settings/credit-rules 现已由 Prisma SystemSetting 支撑（见 system-setting.service.ts）。仅保留向后兼容。*/
+
 import fs from 'fs/promises'
 import path from 'path'
 

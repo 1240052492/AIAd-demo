@@ -1,0 +1,38 @@
+# 依赖与构建产物（容器内会重新安装 / 重新构建）
+node_modules
+**/node_modules
+dist
+**/dist
+build
+**/build
+
+# 环境变量与密钥（运行时通过 env_file / environment 注入，不要打进镜像）
+.env
+.env.*
+**/.env
+**/.env.*
+
+# 运行时产生的存储（上传 / 生成文件），应走挂载卷而非镜像层
+storage
+**/storage
+uploads
+**/uploads
+
+# 工具链与本地状态
+.workbuddy
+**/.workbuddy
+**/.git
+.git
+.gitignore
+
+# 编辑器 / 系统文件
+.vscode
+.idea
+*.swp
+.DS_Store
+Thumbs.db
+
+# 日志
+logs
+**/logs
+*.log

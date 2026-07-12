@@ -2,16 +2,78 @@ import { Router } from 'express'
 import jwt from 'jsonwebtoken'
 import bcrypt from 'bcryptjs'
 import { Prisma } from '@prisma/client'
+import crypto from 'crypto'
 import { prisma, env } from '../config'
 import { authMiddleware } from '../middleware/auth'
 import { registerSchema, loginSchema } from '../utils/validation'
 import { ok, fail } from '../utils/response'
+import { isBlacklisted, addToBlacklist } from '../utils/token-blacklist'
 
 const router = Router()
 
-/** 生成 JWT：payload 仅包含 userId 与 roles */
-function signToken(userId: string, roles: string[]): string {
-  return jwt.sign({ userId, roles }, env.jwtSecret, { expiresIn: env.jwtExpiresIn as jwt.SignOptions['expiresIn'] })
+// 访问令牌 / 刷新令牌有效期
+const ACCESS_TOKEN_EXPIRES_IN = '15m'
+const ACCESS_TOKEN_EXPIRES_IN_SECONDS = 15 * 60
+const REFRESH_TOKEN_EXPIRES_IN = '7d'
+const REFRESH_TOKEN_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000
+
+/**
+ * 刷新令牌密钥：Agent A 会在 config/index.ts 的 env 中新增 refreshTokenSecret；
+ * 在它落地前安全回退到 jwtSecret，保证可编译与可运行。
+ */
+const refreshSecret = (env as { refreshTokenSecret?: string }).refreshTokenSecret ?? env.jwtSecret
+
+/** 从 Cookie 头中解析指定名称的 cookie 值（手动解析，避免引入 cookie-parser 依赖） */
+function readCookie(cookieHeader: string | undefined, name: string): string | undefined {
+  if (!cookieHeader) return undefined
+  const prefix = `${name}=`
+  for (const part of cookieHeader.split(';')) {
+    const trimmed = part.trim()
+    if (trimmed.startsWith(prefix)) {
+      try {
+        return decodeURIComponent(trimmed.slice(prefix.length))
+      } catch {
+        return trimmed.slice(prefix.length)
+      }
+    }
+  }
+  return undefined
+}
+
+/** 签发访问令牌（含 jti，约 15 分钟过期） */
+function signAccessToken(userId: string, roles: string[]): { accessToken: string; expiresIn: number; jti: string } {
+  const jti = crypto.randomUUID()
+  const accessToken = jwt.sign({ userId, roles, jti }, env.jwtSecret, { expiresIn: ACCESS_TOKEN_EXPIRES_IN })
+  return { accessToken, expiresIn: ACCESS_TOKEN_EXPIRES_IN_SECONDS, jti }
+}
+
+/** 签发刷新令牌（含独立 jti，约 7 天过期） */
+function signRefreshToken(userId: string, roles: string[]): { refreshToken: string; jti: string } {
+  const jti = crypto.randomUUID()
+  const refreshToken = jwt.sign({ userId, roles, jti }, refreshSecret, { expiresIn: REFRESH_TOKEN_EXPIRES_IN })
+  return { refreshToken, jti }
+}
+
+/** 设置 httpOnly 刷新令牌 Cookie（手动设置 Set-Cookie，避免额外依赖） */
+function setRefreshCookie(res: import('express').Response, token: string): void {
+  const secure = env.nodeEnv === 'production' ? ' Secure;' : ''
+  const cookie = `refresh_token=${encodeURIComponent(token)}; HttpOnly;${secure} SameSite=Strict; Max-Age=${
+    REFRESH_TOKEN_MAX_AGE_MS / 1000
+  }; Path=/`
+  res.setHeader('Set-Cookie', cookie)
+}
+
+/** 清除刷新令牌 Cookie */
+function clearRefreshCookie(res: import('express').Response): void {
+  const secure = env.nodeEnv === 'production' ? ' Secure;' : ''
+  const cookie = `refresh_token=; HttpOnly;${secure} SameSite=Strict; Max-Age=0; Path=/`
+  res.setHeader('Set-Cookie', cookie)
+}
+
+/** 计算令牌剩余有效期（秒），用于黑名单 exp */
+function remainingSeconds(exp: number | undefined): number {
+  if (!exp) return 0
+  return Math.max(0, Math.floor(exp - Date.now() / 1000))
 }
 
 /** POST /api/auth/register */
@@ -62,10 +124,11 @@ router.post('/register', async (req, res, next) => {
     })
 
     const roles = ['user']
-    const token = signToken(user.id, roles)
+    const { accessToken } = signAccessToken(user.id, roles)
 
     const { passwordHash: _ph, ...safeUser } = user
-    return ok(res, { token, user: safeUser }, '注册成功')
+    // 保持既有响应结构（含 token 字段），同时提供契约字段 accessToken
+    return ok(res, { token: accessToken, accessToken, user: safeUser }, '注册成功')
   } catch (err) {
     next(err)
   }
@@ -105,18 +168,84 @@ router.post('/login', async (req, res, next) => {
     }
 
     const roles = user.roles.map((ur) => ur.role.code)
-    const token = signToken(user.id, roles)
+    const { accessToken, expiresIn } = signAccessToken(user.id, roles)
+    const { refreshToken } = signRefreshToken(user.id, roles)
+    setRefreshCookie(res, refreshToken)
 
     const { passwordHash: _ph, ...safeUser } = user
-    return ok(res, { token, user: safeUser }, '登录成功')
+    // 契约：{ accessToken, expiresIn }；额外保留 token 字段以兼容既有前端
+    return ok(res, { token: accessToken, accessToken, expiresIn, user: safeUser }, '登录成功')
   } catch (err) {
     next(err)
   }
 })
 
-/** POST /api/auth/logout - 客户端清除 token 即可 */
-router.post('/logout', authMiddleware, (_req, res) => {
-  return ok(res, null, '已退出登录')
+/** POST /api/auth/refresh - 用 refresh_token cookie 换取新的 accessToken（并旋转 refresh） */
+router.post('/refresh', async (req, res, next) => {
+  try {
+    const refreshToken = readCookie(req.headers.cookie, 'refresh_token')
+    if (!refreshToken) {
+      return fail(res, 401, '未提供刷新凭证，请重新登录')
+    }
+
+    let payload: Record<string, unknown>
+    try {
+      payload = jwt.verify(refreshToken, refreshSecret) as Record<string, unknown>
+    } catch {
+      return fail(res, 401, '刷新凭证已失效，请重新登录', 401)
+    }
+
+    const jti = payload.jti as string | undefined
+    if (jti) {
+      const blacklisted = await isBlacklisted(jti)
+      if (blacklisted) {
+        return fail(res, 401, '刷新凭证已失效，请重新登录', 401)
+      }
+    }
+
+    const userId = payload.userId as string | undefined
+    if (!userId) {
+      return fail(res, 401, '刷新凭证无效')
+    }
+    const roles = Array.isArray(payload.roles) ? (payload.roles as string[]) : []
+
+    // 旋转：使旧 refresh 立即失效（加入黑名单，exp 为其剩余有效期）
+    if (jti) {
+      const remaining = remainingSeconds(payload.exp as number | undefined)
+      if (remaining > 0) await addToBlacklist(jti, remaining)
+    }
+
+    const { accessToken, expiresIn } = signAccessToken(userId, roles)
+    const { refreshToken: newRefresh } = signRefreshToken(userId, roles)
+    setRefreshCookie(res, newRefresh)
+
+    return ok(res, { accessToken, expiresIn })
+  } catch (err) {
+    next(err)
+  }
+})
+
+/** POST /api/auth/logout - 将 refresh_token 的 jti 拉黑并清除 cookie */
+router.post('/logout', async (_req, res, next) => {
+  try {
+    const refreshToken = readCookie(_req.headers.cookie, 'refresh_token')
+    if (refreshToken) {
+      try {
+        const payload = jwt.verify(refreshToken, refreshSecret) as Record<string, unknown>
+        const jti = payload.jti as string | undefined
+        const remaining = remainingSeconds(payload.exp as number | undefined)
+        if (jti && remaining > 0) {
+          await addToBlacklist(jti, remaining)
+        }
+      } catch {
+        // 非法或已过期的 refresh：忽略校验错误，仍清除 cookie
+      }
+    }
+    clearRefreshCookie(res)
+    return ok(res, null, '已退出登录')
+  } catch (err) {
+    next(err)
+  }
 })
 
 /** GET /api/auth/me - 当前用户信息（不含密码） */

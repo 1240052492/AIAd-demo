@@ -118,11 +118,22 @@ router.get('/:id', authMiddleware, async (req: Request, res: Response, next: Nex
       return res.status(404).json({ code: 404, message: '任务不存在或无权访问', data: null })
     }
 
-    // 直接复用 Worker 写入 responseJson 的精确结果集，
-    // 避免按 projectId 拉取全部 generated_design 资产导致不同任务串味。
+    // results 来源优先级：
+    // 1) Worker 写入 responseJson.results（首要来源，精确对应本任务）；
+    // 2) 仅当 responseJson 无结果时，按 generationJobId 回查本批次资产
+    //    （Agent B 新增字段），彻底避免按 projectId 拉取导致跨批次图片串味。
     let results: unknown[] = []
     if (job.status === 'succeeded') {
-      results = ((job.responseJson as { results?: unknown[] } | null)?.results ?? []) as unknown[]
+      const fromJson = (job.responseJson as { results?: unknown[] } | null)?.results
+      if (Array.isArray(fromJson) && fromJson.length > 0) {
+        results = fromJson
+      } else {
+        const assets = await prisma.asset.findMany({
+          where: { generationJobId: job.id },
+          take: 20,
+        })
+        results = assets
+      }
     }
 
     return res.json({

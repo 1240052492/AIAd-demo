@@ -1,0 +1,144 @@
+# CI/CD 流水线（GitHub Actions）
+#
+# 需要的仓库 Secrets / 环境变量（请到 Settings → Secrets and variables → Actions 配置，
+# 不要在此文件中写入真实值）：
+#   DATABASE_URL   PostgreSQL 连接串，例如 postgresql://user:pass@host:5432/db
+#   REDIS_URL      Redis 连接串，例如 redis://host:6379
+#   JWT_SECRET     用于签发/校验 JWT 的密钥
+#
+# 本工作流假定 pnpm 作为包管理器，根 package.json 为 workspace 配置。
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+  install:
+    runs-on: ubuntu-latest
+    needs: setup
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+  generate:
+    runs-on: ubuntu-latest
+    needs: install
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Prisma generate
+        run: pnpm --filter server prisma generate
+
+  typecheck:
+    runs-on: ubuntu-latest
+    needs: install
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Typecheck server
+        run: pnpm --filter server exec tsc --noEmit
+
+      - name: Typecheck web
+        run: pnpm --filter web exec tsc --noEmit
+
+  build:
+    runs-on: ubuntu-latest
+    needs: [generate, typecheck]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Build server
+        run: pnpm --filter server build
+
+      - name: Build web
+        run: pnpm --filter web build
+
+  test:
+    runs-on: ubuntu-latest
+    needs: install
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      # 当前 server / web 均无 test 脚本，这里做 no-op 占位。
+      # 后续接入测试时替换为：pnpm --filter server test && pnpm --filter web test
+      # add Vitest + Supertest
+      - name: Test (no-op)
+        run: echo "no tests yet — add Vitest + Supertest"

@@ -193,16 +193,18 @@ async function main() {
   }
   console.log('✓ 角色已就绪')
 
-  // 2. 创建管理员
+  // 2. 创建管理员（凭据支持环境变量注入，便于生产部署）
   const adminRole = await prisma.role.findUnique({ where: { code: 'admin' } })
   const userRole = await prisma.role.findUnique({ where: { code: 'user' } })
-  const hashedPassword = await bcrypt.hash('Admin123456', 10)
+  const adminEmail = process.env.ADMIN_EMAIL || 'admin@example.com'
+  const adminPassword = process.env.ADMIN_PASSWORD || 'Admin@123456'
+  const hashedPassword = bcrypt.hashSync(adminPassword, 10)
 
   const admin = await prisma.user.upsert({
-    where: { email: 'admin@adcraft.ai' },
+    where: { email: adminEmail },
     update: {},
     create: {
-      email: 'admin@adcraft.ai',
+      email: adminEmail,
       nickname: '系统管理员',
       passwordHash: hashedPassword,
       status: 'active',
@@ -240,7 +242,7 @@ async function main() {
       },
     })
   }
-  console.log('✓ 管理员已就绪 (admin@adcraft.ai / Admin123456)')
+  console.log(`✓ 管理员已就绪 (${adminEmail} / ${adminPassword})`)
 
   // 2.1 创建示例普通用户（用于演示）
   const demo = await prisma.user.upsert({
@@ -351,6 +353,22 @@ async function main() {
     }
   }
   console.log('✓ AI Provider 配置已就绪')
+
+  // 7. 系统设置（键值存储，value 为 JSON 字符串）
+  const defaultSettings: Array<{ key: string; value: string }> = [
+    { key: 'siteName', value: '"AdCraft AI"' },
+    { key: 'maintenanceMode', value: 'false' },
+    { key: 'uploadLimitMb', value: '20' },
+    { key: 'creditRules', value: '{}' },
+  ]
+  for (const s of defaultSettings) {
+    await prisma.systemSetting.upsert({
+      where: { key: s.key },
+      update: {},
+      create: { key: s.key, value: s.value },
+    })
+  }
+  console.log(`✓ 系统设置已就绪（${defaultSettings.map((s) => s.key).join(', ')}）`)
 
   console.log('✅ 播种完成!')
   // 强制退出，避免 config 中 BullMQ 队列连接使进程挂起

@@ -2,30 +2,105 @@ import { ApiResponse, PaginatedResponse } from '@/types'
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api'
 
-/** 请求封装 */
+/**
+ * Access Token 存储策略（安全升级）：
+ *  - 不再写入 localStorage（避免 XSS 窃取），改为内存变量。
+ *  - 服务端通过 httpOnly Cookie 持有 refresh token（由 Agent D 的
+ *    /api/auth/refresh、/api/auth/logout 管理），fetch 统一带
+ *    `credentials: 'include'` 以便浏览器自动附带该 Cookie。
+ *  - 登录/注册响应中的 access token 会被 request 层自动捕获进内存。
+ *  - 仅在内存中存在时，才在 Authorization 头携带 Bearer token。
+ */
+let accessToken: string | null = null
+
+/** 写入 / 清除内存中的 access token */
+export function setAccessToken(token: string | null): void {
+  accessToken = token
+}
+
+/** 读取内存中的 access token */
+export function getAccessToken(): string | null {
+  return accessToken
+}
+
+/**
+ * 调用 /api/auth/refresh 用 httpOnly refresh cookie 换发新的 access token。
+ * 成功返回新 token，失败（cookie 失效 / 未登录）返回 null。
+ */
+async function refreshAccessToken(): Promise<string | null> {
+  try {
+    const res = await fetch(`${BASE_URL}/auth/refresh`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+    })
+    if (!res.ok) return null
+    const json = (await res.json()) as ApiResponse<{ token: string }>
+    const token = json?.data?.token
+    if (token) {
+      accessToken = token
+      return token
+    }
+    return null
+  } catch {
+    return null
+  }
+}
+
+/** 统一跳转登录页并清理内存 token */
+function redirectToLogin(): void {
+  accessToken = null
+  if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
+    window.location.href = '/login'
+  }
+}
+
+/**
+ * 请求封装。
+ * - 自动附带 credentials: 'include'（httpOnly refresh cookie）。
+ * - 自动携带内存中的 access token（Bearer）。
+ * - 响应若携带 { data: { token } }（登录 / 注册 / 刷新），自动写入内存。
+ * - 遇到 401 先尝试一次 refresh 并重放原请求；仍失败则跳转登录。
+ */
 async function request<T>(path: string, options?: RequestInit): Promise<ApiResponse<T>> {
-  const token = localStorage.getItem('access_token')
-  const res = await fetch(`${BASE_URL}${path}`, {
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...options?.headers,
-    },
-    ...options,
-  })
+  const makeFetch = (token?: string | null) =>
+    fetch(`${BASE_URL}${path}`, {
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...options?.headers,
+      },
+      ...options,
+    })
+
+  let res = await makeFetch(accessToken)
+
+  // 401：尝试用 refresh cookie 换发新 token 并重放一次
+  if (res.status === 401 && accessToken) {
+    const newToken = await refreshAccessToken()
+    if (newToken) {
+      res = await makeFetch(newToken)
+    }
+  }
 
   if (res.status === 401) {
-    localStorage.removeItem('access_token')
-    window.location.href = '/login'
+    redirectToLogin()
     throw new Error('未登录或登录已过期')
   }
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({ message: '请求失败' }))
-    throw new Error(err.message || `HTTP ${res.status}`)
+    throw new Error((err as { message?: string }).message || `HTTP ${res.status}`)
   }
 
-  return res.json()
+  const json = (await res.json()) as ApiResponse<T>
+  // 自动捕获登录 / 注册 / 刷新返回的 access token
+  const returned = (json as unknown as { data?: { token?: string } })?.data
+  if (returned?.token) {
+    accessToken = returned.token
+  }
+  return json
 }
 
 export const api = {
@@ -43,16 +118,16 @@ export const api = {
   /** DELETE 请求 */
   delete: <T>(path: string) => request<T>(path, { method: 'DELETE' }),
 
-  /** 上传文件 */
+  /** 上传文件（同样带 credentials: 'include' 与内存 token） */
   upload: <T>(path: string, file: File, fieldName = 'file') => {
-    const token = localStorage.getItem('access_token')
     const formData = new FormData()
     formData.append(fieldName, file)
     return fetch(`${BASE_URL}${path}`, {
       method: 'POST',
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      credentials: 'include',
+      headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
       body: formData,
-    }).then((r) => r.json())
+    }).then((r) => r.json() as Promise<ApiResponse<T>>)
   },
 }
 
@@ -64,8 +139,30 @@ export const authApi = {
     api.post<{ token: string; user: import('@/types').User }>('/auth/login', data),
   register: (data: { phone?: string; email?: string; password: string; nickname?: string }) =>
     api.post<{ token: string; user: import('@/types').User }>('/auth/register', data),
-  logout: () => api.post('/auth/logout'),
+  // 用 httpOnly refresh cookie 换发新的 access token（Agent D 的 /api/auth/refresh）
+  refresh: () => api.post<{ token: string }>('/auth/refresh'),
+  // 退出：服务端清除 httpOnly refresh cookie（Agent D），前端清理内存 token
+  logout: async () => {
+    await api.post('/auth/logout').catch(() => undefined)
+    accessToken = null
+  },
   me: () => api.get<import('@/types').User>('/auth/me'),
+}
+
+/**
+ * 打开实时进度 WebSocket（同源，浏览器自动附带 httpOnly cookie）。
+ * @param jobId 要订阅的任务 ID
+ * @returns WebSocket 实例，调用方自行监听 message / 关闭连接
+ *
+ * 消息结构（服务端 → 客户端）：
+ *   { "type": "connected", "jobId": string | null }
+ *   { "type": "progress", "jobId": string, "stage": string,
+ *     "percent": number, "message"?: string }
+ */
+export function connectProgressWs(jobId: string): WebSocket {
+  const proto = typeof location !== 'undefined' && location.protocol === 'https:' ? 'wss' : 'ws'
+  const host = typeof location !== 'undefined' ? location.host : '127.0.0.1:4177'
+  return new WebSocket(`${proto}://${host}/ws?jobId=${encodeURIComponent(jobId)}`)
 }
 
 // ============================================

@@ -1,0 +1,11 @@
+{
+  "name": "@adcraft/worker",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Legacy placeholder — neutralized. 真实 worker 见 apps/server/src/workers/image.worker.ts",
+  "main": "src/index.ts",
+  "scripts": {
+    "build": "echo 'apps/worker is a neutralized placeholder; nothing to build.'"
+  }
+}

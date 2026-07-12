@@ -4,7 +4,7 @@ import { sendSuccess, sendPaginated } from '../utils/response'
 import { requireAdmin, AuthRequest } from '../middleware/auth'
 import { adminService } from '../services/admin.service'
 import { templateService } from '../services/template.service'
-import { JsonStore } from '../utils/json-store'
+import { systemSettingService } from '../services/system-setting.service'
 import { prisma } from '../config'
 import { parsePagination, toPaginated } from '../utils/pagination'
 import { NotFoundError, ValidationError } from '../utils/errors'
@@ -100,7 +100,7 @@ router.post(
 router.get(
   '/credit-rules',
   asyncHandler(async (_req: AuthRequest, res: Response) => {
-    const rules = await JsonStore.read('credit-rules', DEFAULT_CREDIT_RULES)
+    const rules = await systemSettingService.get('creditRules', DEFAULT_CREDIT_RULES)
     sendSuccess(res, rules)
   }),
 )
@@ -109,12 +109,12 @@ router.get(
 router.put(
   '/credit-rules',
   asyncHandler(async (req: AuthRequest, res: Response) => {
-    // 原子更新：在文件锁内完成「读取 → 合并 → 写回」，避免并发丢失更新
-    const saved = await JsonStore.update('credit-rules', DEFAULT_CREDIT_RULES, (current) => ({
-      ...current,
-      ...req.body,
-    }))
-    sendSuccess(res, saved, '积分规则已更新')
+    // 读取当前配置（缺省回退到 DEFAULT_CREDIT_RULES），合并请求体后写回。
+    // SystemSetting 由数据库保证一致性，比文件锁更可靠。
+    const current = await systemSettingService.get('creditRules', DEFAULT_CREDIT_RULES)
+    const merged = { ...current, ...req.body }
+    await systemSettingService.set('creditRules', merged)
+    sendSuccess(res, merged, '积分规则已更新')
   }),
 )
 
@@ -320,7 +320,7 @@ router.post(
 router.get(
   '/settings',
   asyncHandler(async (_req: AuthRequest, res: Response) => {
-    const settings = await JsonStore.read('settings', DEFAULT_SETTINGS)
+    const settings = await systemSettingService.get('siteSettings', DEFAULT_SETTINGS)
     sendSuccess(res, settings)
   }),
 )
@@ -329,12 +329,12 @@ router.get(
 router.put(
   '/settings',
   asyncHandler(async (req: AuthRequest, res: Response) => {
-    // 原子更新：在文件锁内完成「读取 → 合并 → 写回」，避免并发丢失更新
-    const saved = await JsonStore.update('settings', DEFAULT_SETTINGS, (current) => ({
-      ...current,
-      ...req.body,
-    }))
-    sendSuccess(res, saved, '系统设置已更新')
+    // 读取当前配置（缺省回退到 DEFAULT_SETTINGS），合并请求体后写回。
+    // SystemSetting 由数据库保证一致性，比文件锁更可靠。
+    const current = await systemSettingService.get('siteSettings', DEFAULT_SETTINGS)
+    const merged = { ...current, ...req.body }
+    await systemSettingService.set('siteSettings', merged)
+    sendSuccess(res, merged, '系统设置已更新')
   }),
 )
 
