@@ -1,0 +1,48 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+build/
+.next/
+out/
+
+# Environment files
+.env
+.env.local
+.env.production
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Storage (uploaded & generated files)
+storage/
+uploads/
+
+# Test coverage
+coverage/
+
+# Turbo / Nx cache
+.turbo/
+.nx/
+
+# WorkBuddy tooling (memory / artifacts / task state) — 本地工具数据，不入仓库
+.workbuddy/
+
+# Runtime data (json-store 生成的配置 json)
+data/

@@ -1,0 +1,23 @@
+{
+  "name": "adcraft-ai",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AdCraft AI 广告行业 AI 设计生产与交付系统",
+  "scripts": {
+    "dev:web": "pnpm --filter web dev",
+    "dev:server": "pnpm --filter server dev",
+    "dev:worker": "pnpm --filter worker dev",
+    "build": "pnpm -r build",
+    "db:migrate": "pnpm --filter server db:migrate",
+    "db:push": "pnpm --filter server db:push",
+    "db:studio": "pnpm --filter server db:studio",
+    "dev": "concurrently \"pnpm dev:server\" \"pnpm dev:worker\" \"pnpm dev:web\""
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2",
+    "typescript": "^5.5.3"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

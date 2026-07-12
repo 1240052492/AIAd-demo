@@ -1,0 +1,55 @@
+# 说明：本机 Docker Hub 被墙，无法直接 pull docker.io 官方镜像。
+# 因此改用 DaoCloud 公共镜像加速（docker.m.daocloud.io/library/*），国内可直连。
+# 如你的环境能访问 Docker Hub，可把下面镜像名换回 postgres:16-alpine / redis:7-alpine。
+services:
+  postgres:
+    image: docker.m.daocloud.io/library/postgres:16-alpine
+    container_name: adcraft-postgres
+    environment:
+      POSTGRES_DB: ad_ai
+      POSTGRES_USER: ad_ai
+      POSTGRES_PASSWORD: ad_ai_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ad_ai -d ad_ai"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: docker.m.daocloud.io/library/redis:7-alpine
+    container_name: adcraft-redis
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # MinIO（可选）：默认 STORAGE_DRIVER=local，本地磁盘存储即可，无需 MinIO。
+  # 本机已运行的 lobe-chat 套件占用了 9000/9001 端口，故此处默认注释掉避免冲突。
+  # 如需切换为 S3 存储，请把上方 STORAGE_DRIVER 改为 minio，并取消下面的注释、
+  # 同时将端口改为 9060/9061 以免与现有 MinIO 冲突，并在 .env 中同步 MINIO_PORT=9060。
+  # minio:
+  #   image: minio/minio
+  #   command: server /data --console-address ":9001"
+  #   environment:
+  #     MINIO_ROOT_USER: minio
+  #     MINIO_ROOT_PASSWORD: minio_password
+  #   ports:
+  #     - "9060:9000"
+  #     - "9061:9001"
+  #   volumes:
+  #     - minio_data:/data
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:

@@ -1,0 +1,232 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// 用户与权限
+// ============================================
+
+model User {
+  id           String   @id @default(cuid())
+  phone        String?  @unique
+  email        String?  @unique
+  nickname     String?
+  passwordHash String   @map("password_hash")
+  status       String   @default("active") // active, disabled, banned
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  roles        UserRole[]
+  creditAccount CreditAccount?
+  projects     Project[]
+  assets       Asset[]
+  generationJobs GenerationJob[]
+  creditTransactions CreditTransaction[]
+
+  @@map("users")
+}
+
+model Role {
+  id        String @id @default(cuid())
+  code      String @unique // admin, user, guest
+  name      String
+  users     UserRole[]
+
+  @@map("roles")
+}
+
+model UserRole {
+  userId    String
+  roleId    String
+  user      User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role      Role   @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([userId, roleId])
+  @@map("user_roles")
+}
+
+// ============================================
+// 积分账户
+// ============================================
+
+model CreditAccount {
+  id             String   @id @default(cuid())
+  userId         String   @unique
+  balance        Int      @default(0)
+  frozenBalance  Int      @default(0) @map("frozen_balance")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  transactions   CreditTransaction[]
+
+  @@map("credit_accounts")
+}
+
+model CreditTransaction {
+  id            String   @id @default(cuid())
+  userId        String
+  accountId     String
+  type          String   // register_bonus, admin_adjust, freeze, consume, refund, recharge
+  amount        Int      // 正数=增加 负数=扣除
+  balanceAfter  Int      @map("balance_after")
+  relatedType   String?  @map("related_type") // project, job, template, manual
+  relatedId     String?  @map("related_id")
+  reason        String?
+  operatorId    String?  @map("operator_id")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  account       CreditAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  user          User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("credit_transactions")
+}
+
+// ============================================
+// 项目
+// ============================================
+
+model Project {
+  id              String   @id @default(cuid())
+  userId          String
+  title           String
+  businessType    String   @map("business_type") // storefront_sign, culture_wall, lightbox, poster, brand_vi, etc.
+  status          String   @default("draft") // draft, generating, editing, completed, exported
+  briefJson       Json?    @map("brief_json")
+  currentVersionId String? @map("current_version_id")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  versions        ProjectVersion[]
+  assets          Asset[]
+  generationJobs  GenerationJob[]
+
+  @@map("projects")
+}
+
+model ProjectVersion {
+  id          String   @id @default(cuid())
+  projectId   String
+  name        String
+  canvasJson  Json?    @map("canvas_json")
+  createdAt   DateTime @default(now()) @map("created_at")
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@map("project_versions")
+}
+
+// ============================================
+// 素材和结果
+// ============================================
+
+model Asset {
+  id            String   @id @default(cuid())
+  userId        String?
+  projectId     String?
+  type          String   // upload_environment, generated_design, composited_preview, export_png, export_pdf, export_svg
+  storageKey    String   @map("storage_key")
+  url           String
+  mimeType      String?  @map("mime_type")
+  width         Int?
+  height        Int?
+  size          Int?     // bytes
+  metadataJson  Json?    @map("metadata_json")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  user          User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  project       Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  templates     Template[] @relation("TemplateCover")
+
+  @@map("assets")
+}
+
+// ============================================
+// 生成任务
+// ============================================
+
+model GenerationJob {
+  id              String    @id @default(cuid())
+  userId          String
+  projectId       String?
+  provider        String    // anthropic, openai, banana2
+  model           String
+  jobType         String    @map("job_type") // brief, prompt, image_generation, composition, export
+  status          String    @default("queued") // queued, submitted, processing, succeeded, failed, canceled
+  prompt          String?
+  requestJson     Json?     @map("request_json")
+  responseJson    Json?     @map("response_json")
+  errorMessage    String?   @map("error_message")
+  creditsFrozen   Int       @default(0) @map("credits_frozen")
+  creditsConsumed Int       @default(0) @map("credits_consumed")
+  startedAt       DateTime? @map("started_at")
+  finishedAt      DateTime? @map("finished_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  project         Project?  @relation(fields: [projectId], references: [id], onDelete: SetNull)
+
+  @@index([status])
+  @@index([userId])
+  @@map("generation_jobs")
+}
+
+// ============================================
+// 模板和工作流
+// ============================================
+
+model Template {
+  id              String   @id @default(cuid())
+  title           String
+  category        String   // 门头招牌, 文化墙, LOGO, 海报, etc.
+  businessType    String   @map("business_type")
+  coverAssetId    String?  @map("cover_asset_id")
+  prompt          String
+  configJson      Json?    @map("config_json")
+  sortOrder       Int      @default(0) @map("sort_order")
+  isPublic        Boolean  @default(true) @map("is_public")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  coverAsset      Asset?   @relation("TemplateCover", fields: [coverAssetId], references: [id], onDelete: SetNull)
+
+  @@index([category])
+  @@index([businessType])
+  @@map("templates")
+}
+
+model WorkflowTemplate {
+  id              String   @id @default(cuid())
+  title           String
+  businessType    String   @map("business_type")
+  description     String?
+  stepsJson       Json     @map("steps_json") // [{role, name, systemPrompt, requireConfirm, creditCost}]
+  creditRuleJson  Json?    @map("credit_rule_json")
+  isPublic        Boolean  @default(true) @map("is_public")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  @@map("workflow_templates")
+}
+
+// ============================================
+// Provider 配置
+// ============================================
+
+model AiProviderConfig {
+  id              String   @id @default(cuid())
+  provider        String   // anthropic, openai, openai_image, banana2
+  displayName     String   @map("display_name")
+  baseUrl         String   @map("base_url")
+  model           String
+  enabled         Boolean  @default(true)
+  priority        Int      @default(0)
+  configJson      Json?    @map("config_json")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@map("ai_provider_configs")
+}
