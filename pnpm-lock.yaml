@@ -191,37 +191,6 @@ importers:
         specifier: ^5.4.3
         version: 5.4.21(@types/node@26.1.1)
 
-  apps/worker:
-    dependencies:
-      '@anthropic-ai/sdk':
-        specifier: ^0.27.0
-        version: 0.27.3
-      '@prisma/client':
-        specifier: ^5.19.0
-        version: 5.22.0(prisma@5.22.0)
-      bullmq:
-        specifier: ^5.15.0
-        version: 5.79.3
-      dotenv:
-        specifier: ^16.4.5
-        version: 16.6.1
-      ioredis:
-        specifier: ^5.4.1
-        version: 5.11.1
-      openai:
-        specifier: ^4.65.0
-        version: 4.104.0(ws@8.21.0)(zod@3.25.76)
-      sharp:
-        specifier: ^0.33.5
-        version: 0.33.5
-    devDependencies:
-      tsx:
-        specifier: ^4.18.0
-        version: 4.23.0
-      typescript:
-        specifier: ^5.5.3
-        version: 5.9.3
-
 packages:
 
   '@alloc/quick-lru@5.2.0':

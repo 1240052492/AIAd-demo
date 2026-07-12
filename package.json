@@ -6,7 +6,7 @@
   "scripts": {
     "dev:web": "pnpm --filter web dev",
     "dev:server": "pnpm --filter server dev",
-    "dev:worker": "pnpm --filter worker dev",
+    "dev:worker": "pnpm --filter @adcraft/server worker:watch",
     "build": "pnpm -r build",
     "db:migrate": "pnpm --filter server db:migrate",
     "db:push": "pnpm --filter server db:push",
