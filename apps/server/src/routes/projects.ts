@@ -9,11 +9,16 @@ import { projectService } from '../services/project.service'
 const router = Router()
 
 const upload = multer({
-  dest: 'uploads/',
+  // 使用内存存储：file.buffer 会被填充（diskStorage 不会填充 buffer，会导致上传 500）。
+  // 对超大/异常文件在 projectService.uploadAsset 内做二次校验。
+  storage: multer.memoryStorage(),
   limits: { fileSize: 20 * 1024 * 1024 }, // 单文件最大 20MB
   fileFilter: (_req, file, cb) => {
     const allowed = /\.(jpe?g|png|webp|svg|pdf)$/i
-    if (allowed.test(file.originalname)) cb(null, true)
+    // 客户端未携带文件名时（如部分 SDK / 测试客户端），回退到 MIME 推断扩展名，
+    // 避免一律拒绝导致"未接收到上传文件"之外的混乱报错。
+    const name = file.originalname || `upload.${String(file.mimetype).split('/')[1] || 'bin'}`
+    if (allowed.test(name)) cb(null, true)
     else cb(new ValidationError('仅允许上传 jpg/png/webp/svg/pdf 文件'))
   },
 })
@@ -85,12 +90,15 @@ router.post(
   }),
 )
 
-// GET /api/projects/:id/assets - 素材列表
+// GET /api/projects/:id/assets - 素材列表（分页：?page=1&pageSize=20）
 router.get(
   '/:id/assets',
   requireAuth,
   asyncHandler(async (req: AuthRequest, res: Response) => {
-    const assets = await projectService.getAssets(req.params.id)
+    const assets = await projectService.getAssets(req.params.id, req.user!.id, {
+      page: req.query.page as any,
+      pageSize: req.query.pageSize as any,
+    })
     sendSuccess(res, assets)
   }),
 )
@@ -102,6 +110,7 @@ router.post(
   asyncHandler(async (req: AuthRequest, res: Response) => {
     const version = await projectService.saveVersion(
       req.params.id,
+      req.user!.id,
       req.body.canvasJson || {},
       req.body.name,
     )
@@ -118,7 +127,7 @@ router.post(
     if (!['png', 'svg', 'pdf'].includes(format)) {
       throw new ValidationError('导出格式仅支持 png / svg / pdf')
     }
-    const result = await projectService.exportProject(req.params.id, format)
+    const result = await projectService.exportProject(req.params.id, req.user!.id, format)
     sendSuccess(res, result, '导出成功')
   }),
 )

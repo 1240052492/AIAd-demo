@@ -1,128 +1,199 @@
 import { useState } from 'react'
-import * as Switch from '@radix-ui/react-switch'
-import { useQuery } from '@tanstack/react-query'
-import { Save, Check } from 'lucide-react'
-import { WORKFLOW_STEPS } from '@/types'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { Loader2, Check, Plus, Pencil, Trash2, Workflow as WorkflowIcon, AlertTriangle } from 'lucide-react'
 import { PageHeader } from './Overview'
+import { Dialog } from '@/components/ui/Dialog'
+import { Tag } from '@/components/ui/Tag'
 import { cn } from '@/utils/cn'
+import {
+  adminConfigApi,
+  type WorkflowTemplate,
+  type WorkflowTemplateInput,
+} from '@/services/admin-config.api'
 
-interface StepConfig {
-  role: string
-  name: string
-  systemPrompt: string
-  needConfirm: boolean
-  credits: number
-  enabled: boolean
+const EMPTY_FORM: WorkflowTemplateInput = {
+  title: '',
+  businessType: 'ad_material',
+  description: '',
+  isPublic: true,
 }
 
-const MOCK_STEPS: StepConfig[] = WORKFLOW_STEPS.map((s, i) => ({
-  role: s.role,
-  name: s.name,
-  systemPrompt: `你是${s.name}专家，${s.description}。请根据输入产出结构化结果。`,
-  needConfirm: i >= 4,
-  credits: [2, 2, 3, 12, 8, 5][i] ?? 2,
-  enabled: true,
-}))
-
 export function WorkflowPanel() {
-  const { data } = useQuery({ queryKey: ['admin', 'workflow'], queryFn: async () => MOCK_STEPS })
-  const [steps, setSteps] = useState<StepConfig[]>(data ?? MOCK_STEPS)
-  const [saved, setSaved] = useState(false)
-  const [enabledAll, setEnabledAll] = useState(true)
+  const qc = useQueryClient()
+  const { data, isLoading, isError } = useQuery({
+    queryKey: ['admin-config', 'workflows'],
+    queryFn: () => adminConfigApi.listWorkflows({ pageSize: 100 }),
+  })
+  const items = data?.items ?? []
 
-  const patch = (i: number, p: Partial<StepConfig>) =>
-    setSteps((ss) => ss.map((s, idx) => (idx === i ? { ...s, ...p } : s)))
+  const [creating, setCreating] = useState(false)
+  const [editing, setEditing] = useState<WorkflowTemplate | null>(null)
+  const [form, setForm] = useState<WorkflowTemplateInput>(EMPTY_FORM)
 
-  const onSave = () => {
-    setSaved(true)
-    setTimeout(() => setSaved(false), 2000)
+  const openCreate = () => {
+    setForm(EMPTY_FORM)
+    setCreating(true)
   }
+  const openEdit = (t: WorkflowTemplate) => {
+    setForm({
+      title: t.title,
+      businessType: t.businessType,
+      description: t.description ?? '',
+      isPublic: t.isPublic,
+    })
+    setEditing(t)
+  }
+  const close = () => {
+    setCreating(false)
+    setEditing(null)
+  }
+
+  const createMut = useMutation({
+    mutationFn: () => adminConfigApi.createWorkflow(form),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['admin-config', 'workflows'] })
+      close()
+    },
+  })
+  const updateMut = useMutation({
+    mutationFn: () => adminConfigApi.updateWorkflow(editing!.id, form),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['admin-config', 'workflows'] })
+      close()
+    },
+  })
+  const deleteMut = useMutation({
+    mutationFn: (id: string) => adminConfigApi.deleteWorkflow(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin-config', 'workflows'] }),
+  })
+
+  const saving = createMut.isPending || updateMut.isPending
+  const dialogOpen = creating || !!editing
 
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between">
-        <PageHeader title="工作流配置" desc="配置广告 AI 流程的 6 个岗位步骤" />
-        <div className="flex items-center gap-4">
-          <label className="flex items-center gap-2 text-sm text-muted">
-            全部启用
-            <Switch.Root
-              checked={enabledAll}
-              onCheckedChange={(v) => {
-                setEnabledAll(v)
-                setSteps((ss) => ss.map((s) => ({ ...s, enabled: v })))
-              }}
-              className="relative h-5 w-9 rounded-full bg-white/15 transition-colors data-[state=checked]:bg-blue"
-            >
-              <Switch.Thumb className="block h-4 w-4 translate-x-0.5 rounded-full bg-white transition-transform data-[state=checked]:translate-x-[18px]" />
-            </Switch.Root>
-          </label>
-          <button className={cn('btn-primary', saved && '!from-green !to-green')} onClick={onSave}>
-            {saved ? <Check size={15} /> : <Save size={15} />}
-            {saved ? '已保存' : '保存配置'}
-          </button>
-        </div>
+        <PageHeader title="工作流配置" desc="管理广告 AI 流程的工作流模板（实时数据）" />
+        <button className="btn-primary !h-9" onClick={openCreate}>
+          <Plus size={15} /> 新建模板
+        </button>
       </div>
 
-      <div className="space-y-3">
-        {steps.map((s, i) => (
-          <section key={s.role} className="panel-card p-4">
-            <div className="flex items-center justify-between">
+      {isError && (
+        <div className="flex items-center gap-2 rounded-btn border border-red/30 bg-red/8 px-4 py-3 text-sm text-red">
+          <AlertTriangle size={15} /> 模板加载失败，请稍后重试。
+        </div>
+      )}
+
+      {isLoading ? (
+        <div className="flex items-center gap-2 py-10 text-muted">
+          <Loader2 size={16} className="animate-spin" /> 加载中…
+        </div>
+      ) : items.length === 0 ? (
+        <div className="panel-card p-10 text-center text-sm text-muted">暂无工作流模板，点击右上角「新建模板」。</div>
+      ) : (
+        <div className="space-y-3">
+          {items.map((t) => (
+            <section key={t.id} className="panel-card flex items-center justify-between p-4">
               <div className="flex items-center gap-3">
-                <span className="flex h-8 w-8 items-center justify-center rounded-btn bg-panel-2 text-base">
-                  {WORKFLOW_STEPS[i]?.icon}
+                <span className="flex h-9 w-9 items-center justify-center rounded-btn bg-panel-2 text-blue">
+                  <WorkflowIcon size={16} />
                 </span>
                 <div>
-                  <p className="text-sm font-semibold text-text">
-                    {i + 1}. {s.name}
+                  <p className="text-sm font-semibold text-text">{t.title}</p>
+                  <p className="font-mono text-xs text-muted">
+                    {t.businessType}
+                    {t.description ? ` · ${t.description}` : ''}
                   </p>
-                  <p className="text-xs text-muted">角色：{s.role}</p>
                 </div>
               </div>
-              <label className="flex items-center gap-2 text-xs text-muted">
-                启用
-                <Switch.Root
-                  checked={s.enabled}
-                  onCheckedChange={(v) => patch(i, { enabled: v })}
-                  className="relative h-5 w-9 rounded-full bg-white/15 transition-colors data-[state=checked]:bg-blue"
+              <div className="flex items-center gap-3">
+                <Tag tone={t.isPublic ? 'green' : 'gray'}>{t.isPublic ? '公开' : '私有'}</Tag>
+                <button className="btn-secondary !h-7 !px-2.5 text-xs" onClick={() => openEdit(t)}>
+                  <Pencil size={13} /> 编辑
+                </button>
+                <button
+                  className="btn-secondary !h-7 !px-2.5 text-xs !text-red"
+                  disabled={deleteMut.isPending}
+                  onClick={() => {
+                    if (confirm(`确认删除模板「${t.title}」？`)) deleteMut.mutate(t.id)
+                  }}
                 >
-                  <Switch.Thumb className="block h-4 w-4 translate-x-0.5 rounded-full bg-white transition-transform data-[state=checked]:translate-x-[18px]" />
-                </Switch.Root>
-              </label>
-            </div>
+                  <Trash2 size={13} /> 删除
+                </button>
+              </div>
+            </section>
+          ))}
+        </div>
+      )}
 
-            <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
-              <label className="block md:col-span-2">
-                <span className="mb-1.5 block text-xs text-muted">System Prompt</span>
-                <textarea
-                  value={s.systemPrompt}
-                  onChange={(e) => patch(i, { systemPrompt: e.target.value })}
-                  rows={2}
-                  className="w-full rounded-btn border border-border bg-panel px-3 py-2 text-sm text-text outline-none focus:border-blue/60"
-                />
-              </label>
-              <label className="flex items-center gap-2 text-sm text-muted">
-                <input
-                  type="checkbox"
-                  checked={s.needConfirm}
-                  onChange={(e) => patch(i, { needConfirm: e.target.checked })}
-                  className="h-4 w-4 accent-blue"
-                />
-                需人工确认
-              </label>
-              <label className="flex items-center gap-2 text-sm text-muted">
-                积分消耗
-                <input
-                  type="number"
-                  min={0}
-                  value={s.credits}
-                  onChange={(e) => patch(i, { credits: Number(e.target.value) })}
-                  className="h-9 w-24 rounded-btn border border-border bg-panel px-3 text-sm text-text outline-none focus:border-blue/60"
-                />
-              </label>
-            </div>
-          </section>
-        ))}
-      </div>
+      <Dialog
+        open={dialogOpen}
+        onOpenChange={(o) => !o && close()}
+        title={editing ? `编辑模板 · ${editing.title}` : '新建工作流模板'}
+        footer={
+          <>
+            <button className="btn-secondary" onClick={close}>取消</button>
+            <button
+              className={cn('btn-primary', saving && 'opacity-60')}
+              disabled={saving || !form.title?.trim()}
+              onClick={() => (editing ? updateMut.mutate() : createMut.mutate())}
+            >
+              {saving ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />}
+              保存
+            </button>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          <label className="block">
+            <span className="mb-1.5 block text-sm text-muted">模板标题</span>
+            <input
+              value={form.title}
+              onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
+              placeholder="如：门头招牌标准流程"
+              className="h-10 w-full rounded-btn border border-border bg-panel px-3 text-sm text-text outline-none focus:border-blue/60"
+            />
+          </label>
+          <label className="block">
+            <span className="mb-1.5 block text-sm text-muted">业务类型（businessType）</span>
+            <input
+              value={form.businessType}
+              onChange={(e) => setForm((f) => ({ ...f, businessType: e.target.value }))}
+              placeholder="如：ad_material"
+              className="h-10 w-full rounded-btn border border-border bg-panel px-3 font-mono text-sm text-text outline-none focus:border-blue/60"
+            />
+          </label>
+          <label className="block">
+            <span className="mb-1.5 block text-sm text-muted">描述</span>
+            <textarea
+              value={form.description}
+              onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
+              rows={2}
+              className="w-full rounded-btn border border-border bg-panel px-3 py-2 text-sm text-text outline-none focus:border-blue/60"
+            />
+          </label>
+          <label className="flex items-center gap-2 text-sm text-muted">
+            <input
+              type="checkbox"
+              checked={!!form.isPublic}
+              onChange={(e) => setForm((f) => ({ ...f, isPublic: e.target.checked }))}
+              className="h-4 w-4 accent-blue"
+            />
+            对外公开
+          </label>
+          {createMut.isError && (
+            <p className="text-sm text-red">
+              {createMut.error instanceof Error ? createMut.error.message : '创建失败'}
+            </p>
+          )}
+          {updateMut.isError && (
+            <p className="text-sm text-red">
+              {updateMut.error instanceof Error ? updateMut.error.message : '更新失败'}
+            </p>
+          )}
+        </div>
+      </Dialog>
     </div>
   )
 }

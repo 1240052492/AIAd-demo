@@ -5,9 +5,9 @@ import { Prisma } from '@prisma/client'
 import crypto from 'crypto'
 import { prisma, env } from '../config'
 import { authMiddleware } from '../middleware/auth'
+import { isBlacklisted, addToBlacklist } from '../utils/token-blacklist'
 import { registerSchema, loginSchema } from '../utils/validation'
 import { ok, fail } from '../utils/response'
-import { isBlacklisted, addToBlacklist } from '../utils/token-blacklist'
 
 const router = Router()
 
@@ -130,6 +130,10 @@ router.post('/register', async (req, res, next) => {
     // 保持既有响应结构（含 token 字段），同时提供契约字段 accessToken
     return ok(res, { token: accessToken, accessToken, user: safeUser }, '注册成功')
   } catch (err) {
+    // 并发注册同一手机号/邮箱：唯一约束冲突（P2002）应返回 400 而非 500
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+      return fail(res, 400, '该手机号或邮箱已被注册')
+    }
     next(err)
   }
 })
@@ -225,9 +229,20 @@ router.post('/refresh', async (req, res, next) => {
   }
 })
 
-/** POST /api/auth/logout - 将 refresh_token 的 jti 拉黑并清除 cookie */
+/** 从请求中提取 access token（Bearer 头优先，其次 access_token cookie） */
+function extractAccessToken(req: import('express').Request): string | undefined {
+  const header = req.headers.authorization
+  if (header && header.startsWith('Bearer ')) {
+    const t = header.slice('Bearer '.length).trim()
+    if (t) return t
+  }
+  return readCookie(req.headers.cookie, 'access_token')
+}
+
+/** POST /api/auth/logout - 将 refresh_token 与 access_token 的 jti 一并拉黑，并清除 cookie */
 router.post('/logout', async (_req, res, next) => {
   try {
+    // 1) refresh token 拉黑（原有逻辑）
     const refreshToken = readCookie(_req.headers.cookie, 'refresh_token')
     if (refreshToken) {
       try {
@@ -241,6 +256,22 @@ router.post('/logout', async (_req, res, next) => {
         // 非法或已过期的 refresh：忽略校验错误，仍清除 cookie
       }
     }
+
+    // 2) access token 拉黑：关闭「登出后 access token 仍可用至过期」的窗口（F12）
+    const accessToken = extractAccessToken(_req)
+    if (accessToken) {
+      try {
+        const payload = jwt.verify(accessToken, env.jwtSecret) as Record<string, unknown>
+        const jti = payload.jti as string | undefined
+        const remaining = remainingSeconds(payload.exp as number | undefined)
+        if (jti && remaining > 0) {
+          await addToBlacklist(jti, remaining)
+        }
+      } catch {
+        // 非法或已过期的 access：忽略校验错误，仍清除 cookie
+      }
+    }
+
     clearRefreshCookie(res)
     return ok(res, null, '已退出登录')
   } catch (err) {

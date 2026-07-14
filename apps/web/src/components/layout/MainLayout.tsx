@@ -19,6 +19,9 @@ const TOP_NAV = [
   { label: '模板库', to: '/templates' },
   { label: '工作流库', to: '/workflows' },
   { label: '案例库', to: '/cases' },
+  // === AGENT_F3_ROUTES ===
+  { label: '数据总览', to: '/dashboard' },
+  // === AGENT_F3_ROUTES ===
 ]
 
 /** 左侧 Rail 导航项 */

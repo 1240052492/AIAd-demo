@@ -11,8 +11,12 @@ import { authRoutes } from './routes/auth'
 import { projectRoutes } from './routes/projects'
 import { aiRoutes } from './routes/ai'
 import { imageJobRoutes } from './routes/image-jobs'
+import { compositionJobRoutes } from './routes/composition-jobs'
+import { vectorAssetRoutes } from './routes/vector-assets'
 import { creditRoutes } from './routes/credits'
 import { adminRoutes } from './routes/admin'
+import { membershipRoutes } from './routes/membership'
+import { dashboardRoutes } from './routes/dashboard'
 import { templateRoutes } from './routes/templates'
 import { AppError } from './utils/errors'
 import { prisma, redisConnection, env } from './config'
@@ -39,6 +43,9 @@ app.use(
       if (env.corsOrigins.includes(origin)) return callback(null, true)
       return callback(null, false)
     },
+    // credentials 仅能为布尔值（cors 类型约束）。此处保持 true：跨域白名单源需要携带 Cookie。
+    // 说明（F13）：无 Origin 的同源/服务端请求会被 cors 反射为 `Access-Control-Allow-Origin: *`，
+    // 非浏览器客户端本就不受 CORS 限制，属于可接受的权衡；如未来引入网关层，建议在网关统一收敛。
     credentials: true,
   }),
 )
@@ -90,12 +97,18 @@ app.get('/api/health', async (_req, res) => {
 app.use('/api/auth/login', loginLimiter)
 app.use('/api/ai', apiLimiter)
 app.use('/api/image-jobs', apiLimiter)
+app.use('/api/composition-jobs', apiLimiter)
+app.use('/api/vector-assets', apiLimiter)
 
 // 路由
 app.use('/api/auth', authRoutes)
 app.use('/api/projects', projectRoutes)
 app.use('/api/ai', aiRoutes)
 app.use('/api/image-jobs', imageJobRoutes)
+app.use('/api/composition-jobs', compositionJobRoutes)
+app.use('/api/membership', membershipRoutes)
+app.use('/api/dashboard', dashboardRoutes)
+app.use('/api/vector-assets', vectorAssetRoutes)
 app.use('/api/credits', creditRoutes)
 app.use('/api/templates', templateRoutes)
 app.use('/api/admin', adminRoutes)

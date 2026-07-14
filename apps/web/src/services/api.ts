@@ -35,8 +35,8 @@ async function refreshAccessToken(): Promise<string | null> {
       credentials: 'include',
     })
     if (!res.ok) return null
-    const json = (await res.json()) as ApiResponse<{ token: string }>
-    const token = json?.data?.token
+    const json = (await res.json()) as ApiResponse<{ token?: string; accessToken?: string }>
+    const token = json?.data?.token ?? json?.data?.accessToken
     if (token) {
       accessToken = token
       return token
@@ -76,8 +76,10 @@ async function request<T>(path: string, options?: RequestInit): Promise<ApiRespo
 
   let res = await makeFetch(accessToken)
 
-  // 401：尝试用 refresh cookie 换发新 token 并重放一次
-  if (res.status === 401 && accessToken) {
+  // 401：无论内存是否已有 token，都先尝试用 httpOnly refresh cookie 换发新 token 并重放一次。
+  // 这样在「硬导航 / 刷新页面」场景下，即使内存 token 尚未被 restoreSession 回填，
+  // 也能凭 refresh cookie 自愈会话，避免把已登录用户误弹回 /login（此前 03-dashboard / 07-editor 截图被弹回登录页）。
+  if (res.status === 401) {
     const newToken = await refreshAccessToken()
     if (newToken) {
       res = await makeFetch(newToken)
@@ -95,10 +97,10 @@ async function request<T>(path: string, options?: RequestInit): Promise<ApiRespo
   }
 
   const json = (await res.json()) as ApiResponse<T>
-  // 自动捕获登录 / 注册 / 刷新返回的 access token
-  const returned = (json as unknown as { data?: { token?: string } })?.data
-  if (returned?.token) {
-    accessToken = returned.token
+  // 自动捕获登录 / 注册 / 刷新返回的 access token（优先 accessToken，兼容旧 token 字段）
+  const returned = (json as unknown as { data?: { token?: string; accessToken?: string } })?.data
+  if (returned?.accessToken || returned?.token) {
+    accessToken = returned.accessToken ?? returned.token ?? null
   }
   return json
 }
@@ -177,11 +179,30 @@ export const projectApi = {
   update: (id: string, data: Partial<import('@/types').Project>) =>
     api.patch<import('@/types').Project>(`/projects/${id}`, data),
   uploadAsset: (projectId: string, file: File) =>
-    api.upload(`/projects/${projectId}/assets`, file),
+    api.upload<import('@/types').Asset>(`/projects/${projectId}/assets`, file),
   getAssets: (projectId: string) =>
     api.get<import('@/types').Asset[]>(`/projects/${projectId}/assets`),
   export: (projectId: string, format: 'png' | 'svg' | 'pdf') =>
     api.post<{ url: string }>(`/projects/${projectId}/export`, { format }),
+}
+
+// ============================================
+// 首页工作台 API
+// ============================================
+export const compositionJobApi = {
+  create: (data: {
+    projectId: string
+    environmentAssetId: string
+    designAssetId: string
+    position?: { x: number; y: number; width: number; height: number }
+    outputFormat?: 'png' | 'jpeg'
+    requiredVisibleTexts?: string[]
+  }) => api.post<{ jobId: string; status: string }>('/composition-jobs', data),
+}
+
+export const vectorAssetApi = {
+  create: (data: { svg: string; projectId?: string; jobId?: string }) =>
+    api.post<{ asset: import('@/types').Asset }>('/vector-assets', data),
 }
 
 // ============================================
@@ -197,9 +218,9 @@ export interface BriefResult {
 }
 
 export const aiApi = {
-  brief: (data: { businessType: string; clientText: string; constraints?: Record<string, string> }) =>
+  brief: (data: { businessType: string; clientText: string; constraints?: Record<string, string>; mock?: boolean }) =>
     api.post<BriefResult>('/ai/brief', data),
-  prompt: (data: { brief: import('@/types').BriefData; stylePreference?: string }) =>
+  prompt: (data: { brief: import('@/types').BriefData; stylePreference?: string; mock?: boolean }) =>
     api.post<{ prompts: string[] }>('/ai/prompt', data),
   runWorkflow: (projectId: string, workflowId: string) =>
     api.post(`/ai/workflows/run`, { projectId, workflowId }),
@@ -209,11 +230,30 @@ export const aiApi = {
 // 图片任务 API
 // ============================================
 export const imageJobApi = {
-  create: (data: { projectId?: string; prompt: string; count?: number; ratio?: string; model?: string }) =>
+  create: (data: {
+    projectId?: string
+    prompt: string
+    count?: number
+    ratio?: string
+    model?: string
+    requiredVisibleTexts?: string[]
+    mock?: boolean
+  }) =>
     api.post<{ jobId: string; status: string }>('/image-jobs', data),
   getStatus: (jobId: string) =>
-    api.get<import('@/types').GenerationJob & { results?: import('@/types').Asset[] }>(`/image-jobs/${jobId}`),
-  poll: async (jobId: string, interval = 3000, maxWait = 120000): Promise<import('@/types').GenerationJob & { results?: import('@/types').Asset[] }> => {
+    api.get<
+      import('@/types').GenerationJob & {
+        results?: import('@/types').Asset[]
+        responseJson?: {
+          textValidation?: import('@/types').TextValidationRecord
+          textCorrections?: import('@/types').TextCorrection[]
+          correctedAssets?: import('@/types').Asset[]
+          assetId?: string
+          url?: string
+        }
+      }
+    >(`/image-jobs/${jobId}`),
+  poll: async (jobId: string, interval = 3000, maxWait = 120000): Promise<import('@/types').GenerationJob & { results?: import('@/types').Asset[]; responseJson?: any }> => {
     const start = Date.now()
     while (Date.now() - start < maxWait) {
       const job = await imageJobApi.getStatus(jobId)
@@ -224,6 +264,16 @@ export const imageJobApi = {
     }
     throw new Error('任务超时')
   },
+  validateText: (jobId: string) =>
+    api.post<{ job: import('@/types').GenerationJob; textValidation: import('@/types').TextValidationRecord }>(
+      `/image-jobs/${jobId}/text-validation`,
+      {},
+    ),
+  applyTextCorrections: (jobId: string, corrections: import('@/types').TextCorrection[]) =>
+    api.post<{ job: import('@/types').GenerationJob; asset: import('@/types').Asset }>(
+      `/image-jobs/${jobId}/text-corrections`,
+      { corrections },
+    ),
 }
 
 // ============================================
@@ -231,6 +281,7 @@ export const imageJobApi = {
 // ============================================
 export const creditApi = {
   balance: () => api.get<import('@/types').CreditAccount>('/credits/balance'),
+  rules: () => api.get<Record<string, number>>('/credits/rules/public'),
   transactions: (params?: { page?: number; pageSize?: number }) =>
     api.get<PaginatedResponse<import('@/types').CreditTransaction>>(
       `/credits/transactions?${new URLSearchParams(params as Record<string, string>).toString()}`

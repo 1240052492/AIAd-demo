@@ -8,7 +8,7 @@ import type { FabricCanvasHandle } from '@/components/editor/types'
 import type { CanvasLayer, ExportFormat } from '@/components/editor/types'
 import type { AssetItem } from '@/components/editor/AssetPanel'
 import { projectApi, creditApi, imageJobApi } from '@/services/api'
-import type { Project } from '@/types'
+import type { Project, Asset } from '@/types'
 import { exportToPNG, exportToSVG } from '@/utils/exportCanvas'
 
 export const CANVAS_W = 610
@@ -140,11 +140,14 @@ export function useEditor(projectId: string, jobId?: string): UseEditorResult {
 
   // 把后端资产映射为面板素材项
   useEffect(() => {
-    if (!assets) return
-    const env = assets
+    const assetsArray: Asset[] = Array.isArray(assets)
+      ? assets
+      : ((assets as any)?.items as Asset[]) ?? []
+    if (assetsArray.length === 0) return
+    const env = assetsArray
       .filter((a) => a.type === 'upload_environment')
       .map((a, i) => ({ id: a.id, url: a.url, title: `环境图 ${i + 1}` }))
-    const ai = assets
+    const ai = assetsArray
       .filter((a) => a.type === 'generated_design')
       .map((a, i) => ({ id: a.id, url: a.url, title: `AI 方案 ${i + 1}` }))
     setEnvImages(env)

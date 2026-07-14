@@ -50,7 +50,7 @@ export class CompositionService {
    */
   async composeToEnvironment(
     options: ComposeOptions,
-    meta: { userId?: string; projectId?: string },
+    meta: { userId?: string; projectId?: string; generationJobId?: string },
   ): Promise<ComposeResult> {
     try {
       // 1. 读取环境图元数据（宽高）
@@ -85,6 +85,7 @@ export class CompositionService {
         data: {
           userId: meta.userId,
           projectId: meta.projectId,
+          generationJobId: meta.generationJobId,
           type: 'composited_preview',
           storageKey: filename,
           url,

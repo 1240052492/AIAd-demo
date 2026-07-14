@@ -1,9 +1,15 @@
 import { useEffect, useMemo, useRef, useState, type RefObject } from 'react'
-import { fabric } from 'fabric'
+import fabricDefault from 'fabric'
 import type {
   CanvasLayer,
   FabricController,
 } from '@/components/editor/types'
+// fabric.js 是 UMD/CJS 包，Vite 默认导入在某些构建下会拿不到 Canvas 构造函数。
+// 优先用全局 window.fabric（UMD 会在浏览器执行后挂载），默认导入作为降级。
+const fabric =
+  (fabricDefault && (fabricDefault as any).Canvas)
+    ? (fabricDefault as any)
+    : (typeof window !== 'undefined' ? (window as any).fabric : fabricDefault) as any
 import { exportToPNG, exportToSVG, exportToJson } from '@/utils/exportCanvas'
 
 /** 生成唯一 id */
@@ -193,6 +199,10 @@ export function useFabricCanvas(
       selection: true,
     })
 
+    // 在 React StrictMode 下组件会 mount→unmount→remount，异步回调（图片加载）可能
+    // 在卸载后的旧 canvas 上执行。用 disposed 标志防止对已 dispose 的画布操作。
+    let disposed = false
+
     // 选中控制手柄样式：蓝色圆点
     fabric.Object.prototype.set({
       transparentCorners: false,
@@ -211,11 +221,13 @@ export function useFabricCanvas(
     const setBackground = (url: string) => {
       fabric.Image.fromURL(
         url,
-        (img) => {
+        (img: any) => {
+          if (disposed || !canvasRef.current) return
           if (!img.width || !img.height) {
-            canvas.renderAll()
+            canvasRef.current?.renderAll()
             return
           }
+          const currentCanvas = canvasRef.current
           const scale = Math.max(width / img.width, height / img.height)
           img.set({
             originX: 'center',
@@ -227,7 +239,7 @@ export function useFabricCanvas(
             selectable: false,
             evented: false,
           })
-          canvas.setBackgroundImage(img, canvas.renderAll.bind(canvas))
+          currentCanvas.setBackgroundImage(img, currentCanvas.renderAll.bind(currentCanvas))
           commit()
         },
         { crossOrigin: 'anonymous' },
@@ -270,11 +282,13 @@ export function useFabricCanvas(
     const addImage = (url: string, opts?: Partial<CanvasLayer>) => {
       fabric.Image.fromURL(
         url,
-        (img) => {
+        (img: any) => {
+          if (disposed || !canvasRef.current) return
           if (!img.width) {
-            canvas.requestRenderAll()
+            canvasRef.current?.requestRenderAll()
             return
           }
+          const currentCanvas = canvasRef.current
           const baseW = opts?.width ?? 260
           const scale = (baseW / img.width) * (opts?.scaleX ?? 1)
           img.set({
@@ -294,9 +308,9 @@ export function useFabricCanvas(
             name: opts?.name ?? '效果图',
             srcLayerContent: url,
           } as any)
-          canvas.add(img)
-          canvas.setActiveObject(img)
-          canvas.requestRenderAll()
+          currentCanvas.add(img)
+          currentCanvas.setActiveObject(img)
+          currentCanvas.requestRenderAll()
           commit()
           syncSelected()
         },
@@ -505,6 +519,7 @@ export function useFabricCanvas(
     commit()
 
     return () => {
+      disposed = true
       canvas.off('selection:created', onSelectionCreated)
       canvas.off('selection:updated', onSelectionUpdated)
       canvas.off('selection:cleared', onSelectionCleared)

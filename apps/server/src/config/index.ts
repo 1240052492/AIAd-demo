@@ -34,11 +34,35 @@ if (nodeEnv === 'production' && (!jwtSecret || jwtSecret === 'dev-secret-change-
 // 未设置时回退为访问密钥 + 后缀（仅用于开发/兼容，生产请显式配置）。
 const refreshTokenSecret = process.env.JWT_REFRESH_SECRET || `${jwtSecret}-refresh`
 
+// 生产守卫：未显式设置独立的 JWT_REFRESH_SECRET 时给出告警。
+// 回退值由强随机的 JWT_SECRET 派生，安全性尚可，但显式独立密钥可在轮换访问密钥时
+// 不影响 refresh 令牌，反之亦然，运维更清晰。
+if (nodeEnv === 'production' && !process.env.JWT_REFRESH_SECRET) {
+  console.warn(
+    '[security] 生产环境未显式设置 JWT_REFRESH_SECRET，当前回退为 JWT_SECRET 派生值。' +
+      '建议在 .env 中单独配置一个不同的强随机串。',
+  )
+}
+
 // CORS 允许的 origin 列表（支持多 origin，逗号分隔；为空时回退到 APP_URL 或 localhost）。
 const corsOrigins = (process.env.CORS_ORIGINS || appUrl)
   .split(',')
   .map((s) => s.trim())
   .filter(Boolean)
+
+// 生产守卫：CORS 白名单必须显式配置为真实前端域名。
+// 若未设置 CORS_ORIGINS 而回退到 localhost/127.0.0.1，说明是误配——生产环境
+// 直接 fail-fast 退出，避免带着错误的跨域白名单上线（前端将全部被拒或安全策略失效）。
+if (nodeEnv === 'production') {
+  const hasLocalhost = corsOrigins.some((o) => /localhost|127\.0\.0\.1/i.test(o))
+  if (!process.env.CORS_ORIGINS || hasLocalhost) {
+    console.error(
+      '[security] 生产环境的 CORS 白名单无效（未设置 CORS_ORIGINS 或仍指向 localhost）！' +
+        '请通过环境变量 CORS_ORIGINS 设置真实前端域名（多个用逗号分隔）后再启动。进程已退出（exit 1）。',
+    )
+    process.exit(1)
+  }
+}
 
 // DB 连接池：在给 PrismaClient 使用的 DATABASE_URL 上追加 connection_limit 查询参数。
 // Prisma 直接读取 process.env.DATABASE_URL，这里覆盖它即可（向后兼容：未设置 DATABASE_URL 时不影响）。
@@ -92,6 +116,15 @@ export const env = {
   // Storage
   storageDriver: process.env.STORAGE_DRIVER || 'local',
   localStorageDir: process.env.LOCAL_STORAGE_DIR || 'storage/uploads',
+
+  // OCR / text correction
+  ocrServiceUrl: process.env.OCR_SERVICE_URL || 'http://127.0.0.1:4188',
+  ocrRequestTimeoutMs: parseInt(process.env.OCR_REQUEST_TIMEOUT_MS || '25000', 10),
+  ocrMaxInputEdge: parseInt(process.env.OCR_MAX_INPUT_EDGE || '2048', 10),
+  ocrMinConfidence: Number(process.env.OCR_MIN_CONFIDENCE || '0.7'),
+  textRenderFontFamily:
+    process.env.TEXT_RENDER_FONT_FAMILY || 'Microsoft YaHei, Noto Sans CJK SC, sans-serif',
+  textRenderMaxInputPixels: parseInt(process.env.TEXT_RENDER_MAX_INPUT_PIXELS || '40000000', 10),
 }
 
 // 命名导出：便于其它 agent 直接 import（与 env 对象内容保持一致）

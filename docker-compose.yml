@@ -59,6 +59,7 @@ services:
       # 容器内通过服务名访问（覆盖 .env 中的 127.0.0.1）
       DATABASE_URL: postgresql://ad_ai:ad_ai_password@postgres:5432/ad_ai
       REDIS_URL: redis://redis:6379
+      OCR_SERVICE_URL: http://ocr-sidecar:4188
     # 仅对内暴露；外部流量经 web(nginx) 的 /api、/ws 代理进来
     expose:
       - "4177"
@@ -67,13 +68,17 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      ocr-sidecar:
+        condition: service_started
     networks:
       - adcraft
 
   # ============================================================
   # AdCraft BullMQ Worker（独立容器，消费 image-generation / composition 队列）
-  # 启动命令匹配 Agent A 添加到 apps/server 的 `worker:start` 脚本。
-  # 真实 worker 入口：apps/server/src/workers/image.worker.ts
+  # 生产必须跑编译产物：worker:prod = `node dist/workers/image.worker.js`。
+  #   （旧的 worker:start = `tsx src/...` 依赖 src 源码与 devDependency tsx，
+  #    而运行时镜像只含 dist，会启动失败——生产切勿使用。）
+  # 真实 worker 入口（编译后）：apps/server/dist/workers/image.worker.js
   # 注：占位包 apps/worker 已中性化（不再启动），不会与本容器抢队列。
   # ============================================================
   worker:
@@ -81,7 +86,7 @@ services:
       context: .
       dockerfile: apps/server/Dockerfile
     container_name: adcraft-worker
-    command: pnpm --filter server worker:start
+    command: pnpm --filter server worker:prod
     env_file:
       - .env
     environment:
@@ -89,11 +94,34 @@ services:
       # worker 同样需要 DB（Prisma）与 Redis
       DATABASE_URL: postgresql://ad_ai:ad_ai_password@postgres:5432/ad_ai
       REDIS_URL: redis://redis:6379
+      OCR_SERVICE_URL: http://ocr-sidecar:4188
     depends_on:
       redis:
         condition: service_healthy
       postgres:
         condition: service_healthy
+      ocr-sidecar:
+        condition: service_started
+    networks:
+      - adcraft
+
+  # ============================================================
+  # OCR Sidecar（FastAPI + PaddleOCR）
+  # 仅供 server/worker 内网调用，用于生成图中文字 OCR 校验。
+  # ============================================================
+  ocr-sidecar:
+    build:
+      context: .
+      dockerfile: ocr-sidecar/Dockerfile
+    container_name: adcraft-ocr-sidecar
+    environment:
+      PADDLE_OCR_LANG: ch
+      FLAGS_use_mkldnn: "0"
+      FLAGS_use_onednn: "0"
+    ports:
+      - "127.0.0.1:4188:4188"
+    expose:
+      - "4188"
     networks:
       - adcraft
 

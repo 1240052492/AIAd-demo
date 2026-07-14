@@ -68,7 +68,9 @@ export class ProjectService {
       where: { id, userId },
       include: {
         versions: { orderBy: { createdAt: 'desc' } },
-        assets: { orderBy: { createdAt: 'desc' } },
+        // 详情页只取最近 20 个素材做预览，避免大项目一次性加载全部素材
+        // （完整列表走独立的 GET /api/projects/:id/assets 分页接口）。
+        assets: { orderBy: { createdAt: 'desc' }, take: 20 },
       },
     })
     if (!project) {
@@ -76,6 +78,9 @@ export class ProjectService {
     }
     return project
   }
+
+  /** 合法的项目状态枚举（与 schema.prisma 注释保持一致） */
+  static readonly PROJECT_STATUSES = ['draft', 'generating', 'editing', 'completed', 'exported'] as const
 
   /** 更新项目，校验归属 */
   async update(id: string, userId: string, data: Partial<any>) {
@@ -87,7 +92,12 @@ export class ProjectService {
     }
     if (data.businessType !== undefined) updatable.businessType = data.businessType
     if (data.briefJson !== undefined) updatable.briefJson = data.briefJson
-    if (data.status !== undefined) updatable.status = data.status
+    if (data.status !== undefined) {
+      if (!ProjectService.PROJECT_STATUSES.includes(data.status)) {
+        throw new ValidationError(`非法的项目状态：${data.status}`)
+      }
+      updatable.status = data.status
+    }
 
     return prisma.project.update({ where: { id }, data: updatable })
   }
@@ -100,6 +110,15 @@ export class ProjectService {
     type: AssetType,
   ) {
     await this.assertOwner(projectId, userId)
+
+    // multer 使用 memoryStorage，file.buffer 必为 Buffer；这里再做一道防御性校验，
+    // 避免空内容/超大文件导致落盘或 sharp 处理时崩溃。
+    if (!file || !Buffer.isBuffer(file.buffer) || file.buffer.length === 0) {
+      throw new ValidationError('上传文件内容为空')
+    }
+    if (file.size > 20 * 1024 * 1024) {
+      throw new ValidationError('上传文件过大，最大 20MB')
+    }
 
     const saved = await FileStorage.save(file.buffer, file.originalname, 'assets')
 
@@ -136,23 +155,45 @@ export class ProjectService {
     })
   }
 
-  /** 获取项目素材列表 */
-  async getAssets(projectId: string): Promise<any[]> {
-    return prisma.asset.findMany({
-      where: { projectId },
-      orderBy: { createdAt: 'desc' },
-    })
+  /** 获取项目素材列表（分页，校验归属） */
+  async getAssets(
+    projectId: string,
+    userId: string,
+    params?: { page?: number; pageSize?: number },
+  ): Promise<PaginatedResponse<any>> {
+    await this.assertOwner(projectId, userId)
+    const { page, pageSize, skip, take } = parsePagination((params ?? {}) as any)
+    const where = { projectId }
+    const [total, items] = await prisma.$transaction([
+      prisma.asset.count({ where }),
+      prisma.asset.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take,
+      }),
+    ])
+    return toPaginated(items, total, page, pageSize)
   }
 
-  /** 保存画布版本 */
+  /** 保存画布版本（校验归属；限制画布体积防 JSON DoS） */
   async saveVersion(
     projectId: string,
+    userId: string,
     canvasJson: object,
     name?: string,
   ) {
-    // 校验项目存在（归属校验由调用方保证）
-    const project = await prisma.project.findUnique({ where: { id: projectId } })
-    if (!project) throw new NotFoundError('项目不存在')
+    await this.assertOwner(projectId, userId)
+    // 防御：画布 JSON 序列化后限长 1MB，避免超大负载直接写入 DB
+    let serialized: string
+    try {
+      serialized = JSON.stringify(canvasJson ?? {})
+    } catch {
+      throw new ValidationError('画布数据无法序列化')
+    }
+    if (serialized.length > 1_000_000) {
+      throw new ValidationError('画布数据过大，最大 1MB')
+    }
 
     const version = await prisma.projectVersion.create({
       data: {
@@ -168,11 +209,13 @@ export class ProjectService {
     return version
   }
 
-  /** 导出项目，返回对应格式文件的 URL（占位渲染，生成最小可用文件） */
+  /** 导出项目，返回对应格式文件的 URL（校验归属；占位渲染生成最小可用文件） */
   async exportProject(
     projectId: string,
+    userId: string,
     format: 'png' | 'svg' | 'pdf',
   ): Promise<{ url: string }> {
+    await this.assertOwner(projectId, userId)
     const project = await prisma.project.findUnique({ where: { id: projectId } })
     if (!project) throw new NotFoundError('项目不存在')
 

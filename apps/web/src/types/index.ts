@@ -9,6 +9,8 @@ export interface User {
   email?: string
   nickname?: string
   role?: 'admin' | 'user'
+  /** 来自 UserRole 关联：[{ role: { code, name } }]，后台权限判断用 */
+  roles?: { role?: { code?: string; name?: string } }[]
   status: string
   createdAt: string
 }
@@ -55,6 +57,7 @@ export type AssetType =
   | 'upload_environment'
   | 'generated_design'
   | 'composited_preview'
+  | 'corrected'
   | 'export_png'
   | 'export_pdf'
   | 'export_svg'
@@ -78,6 +81,51 @@ export interface GenerationJob {
 export type JobType = 'brief' | 'prompt' | 'image_generation' | 'composition' | 'export'
 
 export type JobStatus = 'queued' | 'submitted' | 'processing' | 'succeeded' | 'failed' | 'canceled'
+
+export interface TextPoint {
+  x: number
+  y: number
+}
+
+export interface OcrRegion {
+  id: string
+  text: string
+  confidence: number
+  polygon: TextPoint[]
+}
+
+export interface TextValidationCheck {
+  expectedText: string
+  detectedText?: string
+  confidence?: number
+  regionId?: string
+  matched: boolean
+}
+
+export interface TextValidationRecord {
+  status: 'passed' | 'needs_review' | 'unavailable' | 'pending'
+  expectedTexts: string[]
+  regions: OcrRegion[]
+  checks: TextValidationCheck[]
+  sourceWidth?: number
+  sourceHeight?: number
+  scale?: number
+  error?: string
+  createdAt?: string
+  updatedAt?: string
+}
+
+export interface TextCorrection {
+  expectedText: string
+  regionId?: string
+  x: number
+  y: number
+  width: number
+  height: number
+  fontSize: number
+  textColor: string
+  coverColor: string
+}
 
 /** 模板 */
 export interface Template {

@@ -1,4 +1,5 @@
 import { prisma } from '../config'
+import { NotFoundError, ValidationError, InsufficientBalanceError } from '../utils/errors'
 
 /**
  * 积分操作结果
@@ -16,6 +17,7 @@ export interface CreditContext {
   reason?: string
   relatedType?: string
   relatedId?: string
+  operatorId?: string
 }
 
 /**
@@ -38,31 +40,34 @@ export class CreditService {
    */
   async freeze(userId: string, amount: number, ctx?: CreditContext): Promise<CreditResult> {
     if (!Number.isInteger(amount) || amount <= 0) {
-      throw new Error('冻结积分数量必须为正整数')
+      throw new ValidationError('冻结积分数量必须为正整数')
     }
     return prisma.$transaction(async (tx) => {
       const account = await tx.creditAccount.findUnique({ where: { userId } })
-      if (!account) throw new Error('未找到积分账户')
-      if (account.balance < amount) {
-        throw new Error(`可用积分不足，当前可用 ${account.balance}，需要 ${amount}`)
-      }
-      const updated = await tx.creditAccount.update({
-        where: { id: account.id },
+      if (!account) throw new NotFoundError('未找到积分账户')
+      // 条件更新：单条 UPDATE 自带行锁，且 WHERE balance>=amount 把「检查+扣减」变成原子操作，
+      // 杜绝「读余额 -> 改余额」之间的 TOCTOU 竞态（并发冻结不会超额/负余额/双花）。
+      const result = await tx.creditAccount.updateMany({
+        where: { id: account.id, balance: { gte: amount } },
         data: { balance: { decrement: amount }, frozenBalance: { increment: amount } },
       })
+      if (result.count === 0) {
+        throw new InsufficientBalanceError(`可用积分不足，当前可用 ${account.balance}，需要 ${amount}`)
+      }
+      const updated = await tx.creditAccount.findUnique({ where: { id: account.id } })
       await tx.creditTransaction.create({
         data: {
           userId,
           accountId: account.id,
           type: 'freeze',
           amount: -amount,
-          balanceAfter: updated.balance,
+          balanceAfter: updated!.balance,
           reason: ctx?.reason ?? '冻结积分',
           relatedType: ctx?.relatedType,
           relatedId: ctx?.relatedId,
         },
       })
-      return { accountId: updated.id, balance: updated.balance, frozenBalance: updated.frozenBalance }
+      return { accountId: updated!.id, balance: updated!.balance, frozenBalance: updated!.frozenBalance }
     })
   }
 
@@ -75,31 +80,33 @@ export class CreditService {
    */
   async consume(userId: string, amount: number, ctx?: CreditContext): Promise<CreditResult> {
     if (!Number.isInteger(amount) || amount <= 0) {
-      throw new Error('扣减积分数量必须为正整数')
+      throw new ValidationError('扣减积分数量必须为正整数')
     }
     return prisma.$transaction(async (tx) => {
       const account = await tx.creditAccount.findUnique({ where: { userId } })
-      if (!account) throw new Error('未找到积分账户')
-      if (account.frozenBalance < amount) {
-        throw new Error(`冻结积分不足，无法扣减（冻结 ${account.frozenBalance}，需扣 ${amount}）`)
-      }
-      const updated = await tx.creditAccount.update({
-        where: { id: account.id },
+      if (!account) throw new NotFoundError('未找到积分账户')
+      // 条件更新：WHERE frozenBalance>=amount 保证不会超额扣减（原子，杜绝竞态）
+      const result = await tx.creditAccount.updateMany({
+        where: { id: account.id, frozenBalance: { gte: amount } },
         data: { frozenBalance: { decrement: amount } },
       })
+      if (result.count === 0) {
+        throw new InsufficientBalanceError(`冻结积分不足，无法扣减（冻结 ${account.frozenBalance}，需扣 ${amount}）`)
+      }
+      const updated = await tx.creditAccount.findUnique({ where: { id: account.id } })
       await tx.creditTransaction.create({
         data: {
           userId,
           accountId: account.id,
           type: 'consume',
           amount: -amount,
-          balanceAfter: updated.balance,
+          balanceAfter: updated!.balance,
           reason: ctx?.reason ?? '消耗积分',
           relatedType: ctx?.relatedType,
           relatedId: ctx?.relatedId,
         },
       })
-      return { accountId: updated.id, balance: updated.balance, frozenBalance: updated.frozenBalance }
+      return { accountId: updated!.id, balance: updated!.balance, frozenBalance: updated!.frozenBalance }
     })
   }
 
@@ -111,32 +118,71 @@ export class CreditService {
    */
   async refund(userId: string, amount: number, ctx?: CreditContext): Promise<CreditResult> {
     if (!Number.isInteger(amount) || amount <= 0) {
-      throw new Error('退回积分数量必须为正整数')
+      throw new ValidationError('退回积分数量必须为正整数')
     }
     return prisma.$transaction(async (tx) => {
       const account = await tx.creditAccount.findUnique({ where: { userId } })
-      if (!account) throw new Error('未找到积分账户')
+      if (!account) throw new NotFoundError('未找到积分账户')
       const refundAmount = Math.min(amount, account.frozenBalance)
       if (refundAmount <= 0) {
         return { accountId: account.id, balance: account.balance, frozenBalance: account.frozenBalance }
       }
-      const updated = await tx.creditAccount.update({
-        where: { id: account.id },
+      // 条件更新：WHERE frozenBalance>=refundAmount 保证不会退回超过冻结额（原子，杜绝竞态）
+      const result = await tx.creditAccount.updateMany({
+        where: { id: account.id, frozenBalance: { gte: refundAmount } },
         data: { frozenBalance: { decrement: refundAmount }, balance: { increment: refundAmount } },
       })
+      if (result.count === 0) {
+        throw new InsufficientBalanceError(`冻结积分不足，无法退回（冻结 ${account.frozenBalance}）`)
+      }
+      const updated = await tx.creditAccount.findUnique({ where: { id: account.id } })
       await tx.creditTransaction.create({
         data: {
           userId,
           accountId: account.id,
           type: 'refund',
           amount: refundAmount,
-          balanceAfter: updated.balance,
+          balanceAfter: updated!.balance,
           reason: ctx?.reason ?? '退回积分',
           relatedType: ctx?.relatedType,
           relatedId: ctx?.relatedId,
         },
       })
-      return { accountId: updated.id, balance: updated.balance, frozenBalance: updated.frozenBalance }
+      return { accountId: updated!.id, balance: updated!.balance, frozenBalance: updated!.frozenBalance }
+    })
+  }
+
+  /**
+   * 充值/发放积分：可用余额增加（充值、购买套餐、管理员发放等）。
+   * 与 freeze/consume/refund 一样，每次变动都写流水，保证前后端对账一致。
+   */
+  async recharge(userId: string, amount: number, ctx?: CreditContext): Promise<CreditResult> {
+    if (!Number.isInteger(amount) || amount <= 0) {
+      throw new ValidationError('发放积分数量必须为正整数')
+    }
+    return prisma.$transaction(async (tx) => {
+      const account = await tx.creditAccount.findUnique({ where: { userId } })
+      if (!account) throw new NotFoundError('未找到积分账户')
+      // 条件更新 + 行锁，原子增加可用余额，杜绝竞态
+      await tx.creditAccount.updateMany({
+        where: { id: account.id },
+        data: { balance: { increment: amount } },
+      })
+      const updated = await tx.creditAccount.findUnique({ where: { id: account.id } })
+      await tx.creditTransaction.create({
+        data: {
+          userId,
+          accountId: account.id,
+          type: 'recharge',
+          amount,
+          balanceAfter: updated!.balance,
+          reason: ctx?.reason ?? '充值积分',
+          relatedType: ctx?.relatedType,
+          relatedId: ctx?.relatedId,
+          operatorId: ctx?.operatorId,
+        },
+      })
+      return { accountId: updated!.id, balance: updated!.balance, frozenBalance: updated!.frozenBalance }
     })
   }
 

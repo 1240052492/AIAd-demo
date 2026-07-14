@@ -15,13 +15,18 @@ import {
 } from 'lucide-react'
 import { cn } from '@/utils/cn'
 import { Overview } from './Overview'
-import { UsersPanel } from './Users'
 import { CreditRules } from './CreditRules'
 import { TemplatesPanel } from './Templates'
 import { WorkflowPanel } from './Workflow'
 import { ProvidersPanel } from './Providers'
 import { TaskQueue } from './TaskQueue'
 import { SystemLayoutPanel } from './SystemLayout'
+// === AGENT_F2_TABS ===
+import { RoleConfigPanel } from './RoleConfig'
+import { MembershipMgmtPanel } from './MembershipMgmt'
+import { RechargeMgmtPanel } from './RechargeMgmt'
+import { UserRolesPanel } from './UserRoles'
+// === AGENT_F2_TABS ===
 
 type TabKey =
   | 'overview'
@@ -32,6 +37,12 @@ type TabKey =
   | 'providers'
   | 'queue'
   | 'layout'
+// === AGENT_F2_TABS ===
+  | 'roleconfig'
+  | 'membership'
+  | 'recharge'
+  | 'userroles'
+// === AGENT_F2_TABS ===
 
 const NAV: { key: TabKey; label: string; icon: React.ReactNode }[] = [
   { key: 'overview', label: '数据总览', icon: <LayoutDashboard size={17} /> },
@@ -42,6 +53,11 @@ const NAV: { key: TabKey; label: string; icon: React.ReactNode }[] = [
   { key: 'providers', label: '模型供应商', icon: <Cpu size={17} /> },
   { key: 'queue', label: '生成任务队列', icon: <ListChecks size={17} /> },
   { key: 'layout', label: '系统布局', icon: <LayoutGrid size={17} /> },
+  // === AGENT_F2_TABS ===
+  { key: 'roleconfig', label: '角色权限配置', icon: <ShieldAlert size={17} /> },
+  { key: 'membership', label: '会员管理', icon: <Coins size={17} /> },
+  { key: 'recharge', label: '积分管理', icon: <Coins size={17} /> },
+  // === AGENT_F2_TABS ===
 ]
 
 export default function AdminPage() {
@@ -50,9 +66,12 @@ export default function AdminPage() {
   const navigate = useNavigate()
 
   // 简单的路由权限判断：仅 admin 角色可访问
-  const isAdmin = user?.role === 'admin'
-  const bypass = localStorage.getItem('adcraft_admin_bypass') === '1'
-  const allowed = isAdmin || bypass
+  // me 返回 roles: [{ role: { code: 'admin' } }]（对象数组），并非标量 role，
+  // 故需遍历判断；同时兼容标量 role 写法。
+  const isAdmin =
+    user?.role === 'admin' ||
+    !!user?.roles?.some((r) => (r?.role?.code ?? r) === 'admin')
+  const allowed = isAdmin
 
   if (!allowed) {
     return (
@@ -67,16 +86,6 @@ export default function AdminPage() {
         <div className="flex gap-3">
           <button className="btn-secondary" onClick={() => navigate('/')}>
             <ArrowLeft size={15} /> 返回首页
-          </button>
-          {/* 本地演示入口：无后端 admin 接口时用于预览后台界面 */}
-          <button
-            className="btn-primary"
-            onClick={() => {
-              localStorage.setItem('adcraft_admin_bypass', '1')
-              location.reload()
-            }}
-          >
-            以管理员身份进入（本地演示）
           </button>
         </div>
       </div>
@@ -124,13 +133,18 @@ export default function AdminPage() {
       <main className="admin-main min-w-0 flex-1 overflow-x-hidden">
         <div className="mx-auto max-w-[1200px] px-6 py-6">
           {tab === 'overview' && <Overview />}
-          {tab === 'users' && <UsersPanel />}
+          {tab === 'users' && <UserRolesPanel />}
           {tab === 'credits' && <CreditRules />}
           {tab === 'templates' && <TemplatesPanel />}
           {tab === 'workflow' && <WorkflowPanel />}
           {tab === 'providers' && <ProvidersPanel />}
           {tab === 'queue' && <TaskQueue />}
           {tab === 'layout' && <SystemLayoutPanel />}
+          {/* === AGENT_F2_TABS === */}
+          {tab === 'roleconfig' && <RoleConfigPanel />}
+          {tab === 'membership' && <MembershipMgmtPanel />}
+          {tab === 'recharge' && <RechargeMgmtPanel />}
+          {/* === AGENT_F2_TABS === */}
         </div>
       </main>
     </div>

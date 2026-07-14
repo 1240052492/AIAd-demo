@@ -5,7 +5,11 @@ import { authApi, setAccessToken } from '@/services/api'
 interface AuthState {
   user: User | null
   token: string | null
+  /** restoreSession() 完成标记：在硬导航 / 刷新页面时，应用必须等它完成后再渲染受保护路由，
+   *  否则会抢先以 user=null 发起带鉴权的请求 → 401 → 误弹回 /login。 */
+  restored: boolean
   setAuth: (user: User, token: string) => void
+  setRestored: (v: boolean) => void
   logout: () => void
 }
 
@@ -15,10 +19,12 @@ interface AuthState {
 export const useAuthStore = create<AuthState>()((set) => ({
   user: null,
   token: null,
+  restored: false,
   setAuth: (user, token) => {
     setAccessToken(token)
     set({ user, token })
   },
+  setRestored: (v) => set({ restored: v }),
   logout: () => {
     // 先通知服务端清除 httpOnly refresh cookie，再清理内存态
     void authApi.logout().catch(() => undefined)
@@ -42,8 +48,8 @@ export async function restoreSession(): Promise<void> {
       credentials: 'include',
     })
     if (!res.ok) return
-    const json = (await res.json()) as ApiResponse<{ token: string }>
-    const token = json?.data?.token
+    const json = (await res.json()) as ApiResponse<{ token?: string; accessToken?: string }>
+    const token = json?.data?.token ?? json?.data?.accessToken
     if (!token) return
     setAccessToken(token)
     const me = await authApi.me()
@@ -52,6 +58,9 @@ export async function restoreSession(): Promise<void> {
     }
   } catch {
     /* 未登录或 refresh 失效，保持未认证态 */
+  } finally {
+    // 无论成功失败，都标记恢复完成，避免受保护路由在恢复前抢先渲染并误弹回登录页
+    useAuthStore.getState().setRestored(true)
   }
 }
 

@@ -31,10 +31,13 @@ class SystemSettingService {
    */
   async set(key: string, value: unknown): Promise<void> {
     const serialized = JSON.stringify(value)
+    const now = new Date()
     await prisma.systemSetting.upsert({
       where: { key },
-      update: { value: serialized },
-      create: { key, value: serialized },
+      update: { value: serialized, updatedAt: now },
+      // 注意：system_settings 表曾因迁移漂移产生一个多余的驼峰 updatedAt 列（NOT NULL 无默认值），
+      // 导致所有写入因该列拿到 NULL 而触发 P2011。该列已清理，此处 updatedAt 会正确写入 updated_at。
+      create: { key, value: serialized, updatedAt: now },
     })
   }
 

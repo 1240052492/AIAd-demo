@@ -8,6 +8,10 @@ import { systemSettingService } from '../services/system-setting.service'
 import { prisma } from '../config'
 import { parsePagination, toPaginated } from '../utils/pagination'
 import { NotFoundError, ValidationError } from '../utils/errors'
+import { adjustCreditsSchema } from '../utils/validation'
+import { membershipService } from '../services/membership.service'
+import { rechargeService } from '../services/recharge.service'
+import { roleConfigService } from '../services/role-config.service'
 
 const router = Router()
 
@@ -28,7 +32,35 @@ export const DEFAULT_SETTINGS = {
   allowGuestBrowse: true,
   maintenanceMode: false,
   maxUploadMb: 20,
+  // 系统布局相关（真实联动）
+  industries: ['餐饮', '零售', '教育', '医疗', '地产', '美业'],
+  recommendedTemplates: [] as string[],
+  announcement: '',
 }
+
+/**
+ * 系统设置可写字段白名单：PUT /settings 仅接受下列字段，其余一律忽略，
+ * 防止通过整体合并写入任意脏字段。
+ */
+export const SETTINGS_WRITABLE_FIELDS = [
+  'siteName',
+  'allowGuestBrowse',
+  'maintenanceMode',
+  'maxUploadMb',
+  'industries',
+  'recommendedTemplates',
+  'announcement',
+]
+
+/** 积分规则可写字段白名单：仅接受下列非负数值字段 */
+export const CREDIT_RULE_FIELDS = [
+  'registerBonus',
+  'imageGeneration',
+  'composition',
+  'exportPng',
+  'exportPdf',
+  'exportSvg',
+]
 
 // ===== 数据总览 =====
 // GET /api/admin/overview
@@ -68,6 +100,10 @@ router.get(
 router.patch(
   '/users/:id/status',
   asyncHandler(async (req: AuthRequest, res: Response) => {
+    // 自我保护：禁止管理员操作自身，避免把自己禁用 / 封禁导致锁死
+    if (req.params.id === req.user!.id) {
+      throw new ValidationError('不能修改自己的账号状态')
+    }
     const { status } = req.body
     if (!['active', 'disabled', 'banned'].includes(status)) {
       throw new ValidationError('非法的用户状态')
@@ -84,12 +120,16 @@ router.patch(
 router.post(
   '/users/:id/credits/adjust',
   asyncHandler(async (req: AuthRequest, res: Response) => {
-    const amount = Number(req.body.amount)
+    const parsed = adjustCreditsSchema.safeParse(req.body)
+    if (!parsed.success) {
+      throw new ValidationError(parsed.error.issues[0]?.message || '参数错误')
+    }
+    const { amount, reason } = parsed.data
     const result = await adminService.adjustCredits(
       req.params.id,
       req.user!.id,
       amount,
-      req.body.reason,
+      reason,
     )
     sendSuccess(res, result, '积分调整成功')
   }),
@@ -101,7 +141,8 @@ router.get(
   '/credit-rules',
   asyncHandler(async (_req: AuthRequest, res: Response) => {
     const rules = await systemSettingService.get('creditRules', DEFAULT_CREDIT_RULES)
-    sendSuccess(res, rules)
+    // 合并默认值兜底：若库中该键缺失或字段不全（如曾被写成空对象），仍返回完整默认项。
+    sendSuccess(res, { ...DEFAULT_CREDIT_RULES, ...rules })
   }),
 )
 
@@ -109,12 +150,119 @@ router.get(
 router.put(
   '/credit-rules',
   asyncHandler(async (req: AuthRequest, res: Response) => {
-    // 读取当前配置（缺省回退到 DEFAULT_CREDIT_RULES），合并请求体后写回。
-    // SystemSetting 由数据库保证一致性，比文件锁更可靠。
     const current = await systemSettingService.get('creditRules', DEFAULT_CREDIT_RULES)
-    const merged = { ...current, ...req.body }
+    // 仅接受白名单字段，且必须为非负有限数字；其余忽略。
+    const merged: Record<string, number> = { ...current }
+    for (const key of CREDIT_RULE_FIELDS) {
+      if (req.body?.[key] === undefined) continue
+      const v = Number(req.body[key])
+      if (!Number.isFinite(v) || v < 0) {
+        throw new ValidationError(`积分规则字段 ${key} 必须为非负数字`)
+      }
+      merged[key] = Math.floor(v)
+    }
     await systemSettingService.set('creditRules', merged)
     sendSuccess(res, merged, '积分规则已更新')
+  }),
+)
+
+// ===== 角色权限配置（服务端强制生效） =====
+// GET /api/admin/role-configs
+router.get(
+  '/role-configs',
+  asyncHandler(async (_req: AuthRequest, res: Response) => {
+    const list = await roleConfigService.getAll()
+    sendSuccess(res, list)
+  }),
+)
+
+// PUT /api/admin/role-configs/:roleCode
+router.put(
+  '/role-configs/:roleCode',
+  asyncHandler(async (req: AuthRequest, res: Response) => {
+    const { rate, permissions } = req.body ?? {}
+    if (rate !== undefined && (typeof rate !== 'number' || rate <= 0 || rate > 5)) {
+      throw new ValidationError('倍率必须为 0 < rate <= 5 的数字')
+    }
+    const updated = await roleConfigService.upsert(req.params.roleCode, { rate, permissions })
+    sendSuccess(res, updated, '角色配置已更新')
+  }),
+)
+
+// ===== 会员套餐管理 =====
+// GET /api/admin/membership-plans
+router.get(
+  '/membership-plans',
+  asyncHandler(async (_req: AuthRequest, res: Response) => {
+    const plans = await membershipService.listPlans()
+    sendSuccess(res, plans)
+  }),
+)
+
+// POST /api/admin/membership-plans
+router.post(
+  '/membership-plans',
+  asyncHandler(async (req: AuthRequest, res: Response) => {
+    const plan = await membershipService.upsertPlan(req.body)
+    sendSuccess(res, plan, '套餐创建成功')
+  }),
+)
+
+// PUT /api/admin/membership-plans/:id
+router.put(
+  '/membership-plans/:id',
+  asyncHandler(async (req: AuthRequest, res: Response) => {
+    const plan = await membershipService.upsertPlan({ ...req.body, id: req.params.id })
+    sendSuccess(res, plan, '套餐更新成功')
+  }),
+)
+
+// DELETE /api/admin/membership-plans/:id
+router.delete(
+  '/membership-plans/:id',
+  asyncHandler(async (req: AuthRequest, res: Response) => {
+    await membershipService.deletePlan(req.params.id)
+    sendSuccess(res, null, '套餐已删除')
+  }),
+)
+
+// ===== 充值管理 =====
+// GET /api/admin/recharges
+router.get(
+  '/recharges',
+  asyncHandler(async (req: AuthRequest, res: Response) => {
+    const result = await rechargeService.listAll({
+      page: req.query.page ? Number(req.query.page) : undefined,
+      pageSize: req.query.pageSize ? Number(req.query.pageSize) : undefined,
+      status: req.query.status as string | undefined,
+    })
+    sendPaginated(res, toPaginated(result.items, result.total, result.page, result.pageSize))
+  }),
+)
+
+// ===== 用户角色配置（权限生效关键点） =====
+// PUT /api/admin/users/:id/roles  { roleCodes: string[] }
+router.put(
+  '/users/:id/roles',
+  asyncHandler(async (req: AuthRequest, res: Response) => {
+    // 自我保护：禁止管理员修改自身角色，避免误降权导致无法管理
+    if (req.params.id === req.user!.id) {
+      throw new ValidationError('不能修改自己的角色')
+    }
+    const { roleCodes } = req.body ?? {}
+    if (!Array.isArray(roleCodes)) throw new ValidationError('roleCodes 必须为数组')
+    const valid = await prisma.role.findMany({ where: { code: { in: roleCodes } } })
+    if (valid.length !== roleCodes.length) throw new ValidationError('存在非法的角色编码')
+    await prisma.userRole.deleteMany({ where: { userId: req.params.id } })
+    if (roleCodes.length) {
+      await prisma.userRole.createMany({
+        data: roleCodes.map((code: string) => ({
+          userId: req.params.id,
+          roleId: valid.find((r) => r.code === code)!.id,
+        })),
+      })
+    }
+    sendSuccess(res, { roleCodes }, '用户角色已更新（重新登录后生效）')
   }),
 )
 
@@ -321,7 +469,8 @@ router.get(
   '/settings',
   asyncHandler(async (_req: AuthRequest, res: Response) => {
     const settings = await systemSettingService.get('siteSettings', DEFAULT_SETTINGS)
-    sendSuccess(res, settings)
+    // 合并默认值兜底：库中缺失的字段（如新增的 industries/announcement）回退到默认。
+    sendSuccess(res, { ...DEFAULT_SETTINGS, ...settings })
   }),
 )
 
@@ -329,10 +478,13 @@ router.get(
 router.put(
   '/settings',
   asyncHandler(async (req: AuthRequest, res: Response) => {
-    // 读取当前配置（缺省回退到 DEFAULT_SETTINGS），合并请求体后写回。
-    // SystemSetting 由数据库保证一致性，比文件锁更可靠。
     const current = await systemSettingService.get('siteSettings', DEFAULT_SETTINGS)
-    const merged = { ...current, ...req.body }
+    // 仅接受白名单字段，其余忽略，防止写入任意脏字段。
+    const picked: Record<string, unknown> = {}
+    for (const key of SETTINGS_WRITABLE_FIELDS) {
+      if (req.body?.[key] !== undefined) picked[key] = req.body[key]
+    }
+    const merged = { ...current, ...picked }
     await systemSettingService.set('siteSettings', merged)
     sendSuccess(res, merged, '系统设置已更新')
   }),

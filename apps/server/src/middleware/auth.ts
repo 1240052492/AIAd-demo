@@ -106,6 +106,8 @@ export type AuthRequest = Request
 function isAdmin(user?: AuthUser): boolean {
   if (!user) return false
   if (user.role === 'admin') return true
+  // 注意：接口字段为 `roles`（见上方 AuthUser 定义），下方曾误写为 `user.roles`，
+  // 导致仅以 roles 数组写入的管理员被 requireAdmin 误判为 403。已修正。
   if (Array.isArray(user.roles) && user.roles.includes('admin')) return true
   return false
 }

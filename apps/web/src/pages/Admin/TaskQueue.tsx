@@ -1,64 +1,77 @@
 import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import { RefreshCw, ChevronDown, Loader2 } from 'lucide-react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { RefreshCw, ChevronDown, Loader2, AlertTriangle } from 'lucide-react'
 import { DataTable, type Column } from '@/components/admin/DataTable'
 import { Tag, type TagTone, statusTone } from '@/components/ui/Tag'
 import { PageHeader } from './Overview'
 import { cn } from '@/utils/cn'
-
-interface QueueJob {
-  id: string
-  user: string
-  provider: string
-  model: string
-  type: string
-  status: string
-  duration: string
-  createdAt: string
-  prompt: string
-}
-
-// 演示数据（后端暂无 /admin/queue 接口）
-const MOCK: QueueJob[] = [
-  { id: 'q1', user: '张设计', provider: 'gpt-image-2', model: 'gpt-image-2', type: 'image_generation', status: 'succeeded', duration: '8.2s', createdAt: '2025-12-12 10:01', prompt: '发光字门头，蓝色科技感，夜晚街道' },
-  { id: 'q2', user: '李广告', provider: 'anthropic', model: 'claude-3-5-sonnet', type: 'brief', status: 'succeeded', duration: '2.1s', createdAt: '2025-12-12 10:03', prompt: '整理客户门头招牌需求' },
-  { id: 'q3', user: '王制作', provider: 'gpt-image-2', model: 'gpt-image-2', type: 'composition', status: 'failed', duration: '—', createdAt: '2025-12-12 10:05', prompt: '将设计稿合成到门店环境' },
-  { id: 'q4', user: '陈运营', provider: 'gpt-image-2', model: 'gpt-image-2', type: 'image_generation', status: 'processing', duration: '进行中', createdAt: '2025-12-12 10:07', prompt: '企业文化墙展板，简约风格' },
-  { id: 'q5', user: '刘策划', provider: 'anthropic', model: 'claude-3-5-sonnet', type: 'prompt', status: 'queued', duration: '—', createdAt: '2025-12-12 10:08', prompt: '生成 3 条创意方向' },
-]
+import { adminConfigApi, type GenerationJob } from '@/services/admin-config.api'
 
 const FILTERS = ['全部', 'succeeded', 'processing', 'failed', 'queued']
+const JOB_TYPE_LABEL: Record<string, string> = {
+  brief: '需求整理',
+  prompt: '提示词生成',
+  image_generation: '视觉生图',
+  composition: '环境合成',
+  export: '导出输出',
+}
+
+function fmtTime(s?: string | null): string {
+  if (!s) return '—'
+  const d = new Date(s)
+  if (Number.isNaN(d.getTime())) return s
+  return d.toLocaleString('zh-CN', { hour12: false })
+}
+
+function fmtDuration(j: GenerationJob): string {
+  if (j.finishedAt) {
+    const ms = new Date(j.finishedAt).getTime() - new Date(j.createdAt).getTime()
+    const sec = Math.max(0, ms / 1000)
+    return sec >= 1 ? `${sec.toFixed(1)}s` : `${Math.round(ms)}ms`
+  }
+  if (j.status === 'processing') return '进行中'
+  return '—'
+}
 
 export function TaskQueue() {
-  const { data, isFetching } = useQuery({ queryKey: ['admin', 'queue'], queryFn: async () => MOCK })
+  const qc = useQueryClient()
   const [filter, setFilter] = useState('全部')
   const [expanded, setExpanded] = useState<string | null>(null)
-  const [retrying, setRetrying] = useState<string | null>(null)
+  const [page, setPage] = useState(1)
+  const pageSize = 20
 
-  const jobs = (data ?? []).filter((j) => filter === '全部' || j.status === filter)
-  const jobTypeLabel: Record<string, string> = {
-    brief: '需求整理',
-    prompt: '提示词生成',
-    image_generation: '视觉生图',
-    composition: '环境合成',
-    export: '导出输出',
-  }
+  const { data, isFetching, isError } = useQuery({
+    queryKey: ['admin-config', 'jobs', filter, page],
+    queryFn: () =>
+      adminConfigApi.listJobs({
+        status: filter === '全部' ? undefined : filter,
+        page,
+        pageSize,
+      }),
+  })
 
-  const retry = (id: string) => {
-    setRetrying(id)
-    // 演示：实际应调用重试接口
-    setTimeout(() => setRetrying(null), 1200)
-  }
+  const jobs = data?.items ?? []
+  const total = data?.total ?? 0
+  const totalPages = Math.max(1, Math.ceil(total / pageSize))
 
-  const columns: Column<QueueJob>[] = [
-    { key: 'id', header: 'ID', cell: (r) => <span className="font-mono text-xs text-muted">{r.id}</span> },
-    { key: 'user', header: '用户', cell: (r) => r.user },
+  const retryMut = useMutation({
+    mutationFn: (id: string) => adminConfigApi.retryJob(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin-config', 'jobs', filter, page] }),
+  })
+
+  const columns: Column<GenerationJob>[] = [
+    { key: 'id', header: 'ID', cell: (r) => <span className="font-mono text-xs text-muted">{r.id.slice(0, 8)}</span> },
+    { key: 'user', header: '用户', cell: (r) => r.userNickname || '未知用户' },
     { key: 'provider', header: 'Provider', cell: (r) => <span className="text-muted">{r.provider}</span> },
     { key: 'model', header: '模型', cell: (r) => <span className="text-muted">{r.model}</span> },
-    { key: 'type', header: '类型', cell: (r) => jobTypeLabel[r.type] ?? r.type },
-    { key: 'status', header: '状态', cell: (r) => <Tag tone={statusTone(r.status)}>{r.status}</Tag> },
-    { key: 'duration', header: '耗时', cell: (r) => <span className="text-muted">{r.duration}</span> },
-    { key: 'createdAt', header: '创建时间', cell: (r) => <span className="text-muted">{r.createdAt}</span> },
+    { key: 'type', header: '类型', cell: (r) => JOB_TYPE_LABEL[r.jobType] ?? r.jobType },
+    {
+      key: 'status',
+      header: '状态',
+      cell: (r) => <Tag tone={(statusTone(r.status) ?? 'gray') as TagTone}>{r.status}</Tag>,
+    },
+    { key: 'duration', header: '耗时', cell: (r) => <span className="text-muted">{fmtDuration(r)}</span> },
+    { key: 'createdAt', header: '创建时间', cell: (r) => <span className="text-muted">{fmtTime(r.createdAt)}</span> },
     {
       key: 'op',
       header: '操作',
@@ -77,13 +90,17 @@ export function TaskQueue() {
           {r.status === 'failed' && (
             <button
               className="btn-secondary !h-7 !px-2.5 text-xs !text-amber"
-              disabled={retrying === r.id}
+              disabled={retryMut.isPending && retryMut.variables === r.id}
               onClick={(e) => {
                 e.stopPropagation()
-                retry(r.id)
+                retryMut.mutate(r.id)
               }}
             >
-              {retrying === r.id ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
+              {retryMut.isPending && retryMut.variables === r.id ? (
+                <Loader2 size={13} className="animate-spin" />
+              ) : (
+                <RefreshCw size={13} />
+              )}
               重试
             </button>
           )}
@@ -94,14 +111,31 @@ export function TaskQueue() {
 
   return (
     <div className="space-y-5">
-      <PageHeader title="生成任务队列" desc="查看实时生成任务、重试失败任务" />
+      <PageHeader title="生成任务队列" desc="查看实时生成任务、重试失败任务（真实数据）" />
 
-      <div className="flex flex-wrap gap-2">
-        {FILTERS.map((f) => (
-          <button key={f} onClick={() => setFilter(f)} className={cn('pill-tag', filter === f && 'active')}>
-            {f === '全部' ? '全部' : f}
+      {isError && (
+        <div className="flex items-center gap-2 rounded-btn border border-red/30 bg-red/8 px-4 py-3 text-sm text-red">
+          <AlertTriangle size={15} /> 任务列表加载失败，请稍后重试。
+        </div>
+      )}
+
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap gap-2">
+          {FILTERS.map((f) => (
+            <button key={f} onClick={() => { setFilter(f); setPage(1) }} className={cn('pill-tag', filter === f && 'active')}>
+              {f === '全部' ? '全部' : f}
+            </button>
+          ))}
+        </div>
+        <div className="flex items-center gap-3">
+          <button className="btn-secondary !h-8 text-xs" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>
+            上一页
           </button>
-        ))}
+          <span className="text-sm text-muted">第 {page} / {totalPages} 页</span>
+          <button className="btn-secondary !h-8 text-xs" disabled={page >= totalPages} onClick={() => setPage((p) => Math.min(totalPages, p + 1))}>
+            下一页
+          </button>
+        </div>
       </div>
 
       <DataTable columns={columns} data={jobs} loading={isFetching} rowKey={(r) => r.id} emptyText="无匹配任务" />
@@ -112,6 +146,9 @@ export function TaskQueue() {
           <pre className="whitespace-pre-wrap rounded-btn bg-panel-2 p-3 text-xs leading-relaxed text-text/90">
             {jobs.find((j) => j.id === expanded)?.prompt ?? '—'}
           </pre>
+          {jobs.find((j) => j.id === expanded)?.errorMessage && (
+            <p className="mt-2 text-xs text-red">错误信息：{jobs.find((j) => j.id === expanded)?.errorMessage}</p>
+          )}
         </div>
       )}
     </div>

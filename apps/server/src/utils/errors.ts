@@ -39,6 +39,14 @@ export class ForbiddenError extends AppError {
   }
 }
 
+/** 积分余额不足（业务条件，返回 400，与文案解耦） */
+export class InsufficientBalanceError extends AppError {
+  constructor(message = '积分余额不足') {
+    super(message, 400, 400)
+    this.name = 'InsufficientBalanceError'
+  }
+}
+
 /** 参数校验错误 */
 export class ValidationError extends AppError {
   constructor(message = '请求参数错误') {

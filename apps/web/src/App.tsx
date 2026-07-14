@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import MainLayout from '@/components/layout/MainLayout'
 import AuthLayout from '@/components/layout/AuthLayout'
@@ -5,11 +6,45 @@ import HomePage from '@/pages/Home'
 import EditorPage from '@/pages/Editor'
 import ProjectsPage from '@/pages/Projects'
 import AdminPage from '@/pages/Admin'
+// === AGENT_F3_ROUTES ===
+import DashboardPage from '@/pages/Dashboard'
+// === AGENT_F3_ROUTES ===
 import { TemplateLibrary } from '@/components/projects/TemplateLibrary'
 import LoginPage from '@/pages/Login'
 import RegisterPage from '@/pages/Register'
+// === AGENT_F1_ROUTES ===
+import MembershipPage from '@/pages/Membership'
+import { PointsDetail } from '@/pages/Membership/PointsDetail'
+import { Profile } from '@/pages/Membership/Profile'
+import { useAuthStore } from '@/stores'
+
+/** 受保护路由：restoreSession 完成后，若仍未登录则跳转登录页。
+ * 关键：必须等 restored=true，避免硬导航时（内存 token 尚未回填）抢先误弹回 /login。 */
+function Protected({ children }: { children: ReactNode }) {
+  const restored = useAuthStore((s) => s.restored)
+  const user = useAuthStore((s) => s.user)
+  if (!restored) return <FullScreenLoader />
+  if (!user) return <Navigate to="/login" replace />
+  return <>{children}</>
+}
+
+function FullScreenLoader() {
+  return (
+    <div className="flex h-screen w-screen items-center justify-center bg-slate-50">
+      <div className="flex flex-col items-center gap-3">
+        <div className="h-8 w-8 animate-spin rounded-full border-2 border-slate-300 border-t-indigo-600" />
+        <span className="text-sm text-slate-500">加载中…</span>
+      </div>
+    </div>
+  )
+}
 
 export default function App() {
+  const restored = useAuthStore((s) => s.restored)
+
+  // 应用启动后、restoreSession() 完成前，先展示全屏加载，避免受保护路由抢先渲染导致误登出
+  if (!restored) return <FullScreenLoader />
+
   return (
     <Routes>
       {/* 认证页面（无侧边栏） */}
@@ -24,8 +59,23 @@ export default function App() {
         <Route path="/projects" element={<ProjectsPage />} />
         <Route path="/projects/:id" element={<ProjectsPage />} />
         <Route path="/templates" element={<div className="mx-auto max-w-[1200px] px-6 py-6"><TemplateLibrary /></div>} />
-        <Route path="/editor/:projectId" element={<EditorPage />} />
-        <Route path="/admin/*" element={<AdminPage />} />
+        {/* 携带图生图编辑器：?seedImg=<url>&polishPrompt=<text> */}
+        <Route path="/editor" element={<Protected><EditorPage /></Protected>} />
+        <Route path="/editor/:projectId" element={<Protected><EditorPage /></Protected>} />
+        <Route path="/admin/*" element={<Protected><AdminPage /></Protected>} />
+        {/* === AGENT_F1_ROUTES === 会员 / 积分 / 个人中心 */}
+        <Route path="/membership" element={<Protected><MembershipPage /></Protected>} />
+        <Route
+          path="/credits"
+          element={<Protected><div className="mx-auto max-w-[1200px] px-6 py-6"><PointsDetail /></div></Protected>}
+        />
+        <Route
+          path="/profile"
+          element={<Protected><div className="mx-auto max-w-[1200px] px-6 py-6"><Profile /></div></Protected>}
+        />
+        {/* === AGENT_F3_ROUTES === */}
+        <Route path="/dashboard" element={<Protected><DashboardPage /></Protected>} />
+        {/* === AGENT_F3_ROUTES === */}
       </Route>
 
       {/* 兜底 */}

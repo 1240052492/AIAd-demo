@@ -1,7 +1,13 @@
 import { Router, Request, Response, NextFunction } from 'express'
+import sharp from 'sharp'
 import { authMiddleware } from '../middleware/auth'
 import { prisma, imageQueue, env } from '../config'
 import { creditService } from '../services/credit.service'
+import { creditRuleService } from '../services/credit-rule.service'
+import { roleConfigService } from '../services/role-config.service'
+import { textValidationService, TextValidationRecord } from '../services/ai/text-validation.service'
+import { textCorrectionService } from '../services/ai/text-correction.service'
+import { saveBuffer } from '../utils/storage'
 
 const router = Router()
 
@@ -27,6 +33,61 @@ function resolveSize(ratio?: string): string {
   return '1024x1024'
 }
 
+function normalizeRequiredVisibleTexts(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  const seen = new Set<string>()
+  return value
+    .map((item) => String(item || '').trim().replace(/\s+/g, ' '))
+    .filter((item) => item.length > 0 && item.length <= 80)
+    .filter((item) => {
+      const key = item.toLocaleLowerCase().replace(/\s+/g, '')
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+    .slice(0, 8)
+}
+
+function responseObject(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {}
+}
+
+function requestObject(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {}
+}
+
+async function getSourceAsset(jobId: string, jobType: string) {
+  const preferredTypes =
+    jobType === 'composition' ? ['composited_preview', 'corrected'] : ['generated_design', 'corrected']
+  return prisma.asset.findFirst({
+    where: {
+      generationJobId: jobId,
+      type: { in: preferredTypes },
+    },
+    orderBy: { createdAt: 'desc' },
+  })
+}
+
+function escapeSvgText(value: string): string {
+  return value.replace(/[&<>"']/g, (character) => {
+    const entities: Record<string, string> = {
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      '"': '&quot;',
+      "'": '&apos;',
+    }
+    return entities[character] || character
+  })
+}
+
+async function createMockImage(prompt: string, requiredVisibleTexts: string[]) {
+  const title = requiredVisibleTexts[0] || 'AdCraft AI'
+  const subtitle = prompt.slice(0, 120)
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="800" viewBox="0 0 1200 800"><rect width="1200" height="800" fill="#f8fafc"/><rect x="160" y="160" width="880" height="360" rx="28" fill="#ffffff" stroke="#1f2937" stroke-width="8"/><text x="600" y="340" text-anchor="middle" font-family="Arial, Microsoft YaHei, sans-serif" font-size="76" font-weight="700" fill="#111827">${escapeSvgText(title)}</text><text x="600" y="430" text-anchor="middle" font-family="Arial, Microsoft YaHei, sans-serif" font-size="30" fill="#64748b">AdCraft mock preview</text><text x="600" y="650" text-anchor="middle" font-family="Arial, Microsoft YaHei, sans-serif" font-size="22" fill="#475569">${escapeSvgText(subtitle)}</text></svg>`
+  return sharp(Buffer.from(svg)).png().toBuffer()
+}
+
 /**
  * POST /api/image-jobs
  * 提交异步生图任务：校验并冻结积分 -> 创建 GenerationJob -> 入 BullMQ 队列。
@@ -48,27 +109,74 @@ router.post('/', authMiddleware, async (req: Request, res: Response, next: NextF
     }
     const userId = req.user!.id
 
+    // 归属校验：若提供了 projectId，必须属于当前用户，否则写 IDOR（可把生成资产写入他人项目）
+    if (projectId) {
+      const project = await prisma.project.findFirst({ where: { id: projectId, userId } })
+      if (!project) {
+        return res.status(403).json({ code: 403, message: '无权向该项目的任务提交生图任务', data: null })
+      }
+    }
+
     const n = Math.min(Math.max(parseInt(String(count || '1'), 10) || 1, 1), 4)
     const size = resolveSize(ratio)
-    const creditCost = n * 2 // 每张 2 积分
+    const imageCreditCost = await creditRuleService.getCost('imageGeneration')
+    const mock = req.body?.mock === true
+    // 服务端强制应用角色消费倍率（代理 0.7 等），前端无法绕过
+    const roleRate = await roleConfigService.getEffectiveRate(req.user!.roles ?? [])
+    const creditCost = mock ? 0 : Math.ceil(n * imageCreditCost * roleRate)
+    const requiredVisibleTexts = normalizeRequiredVisibleTexts(req.body?.requiredVisibleTexts)
 
-    // 直接冻结积分：freeze 在数据库事务内校验余额，
-    // 避免「先 getBalance 再 freeze」之间的 TOCTOU 竞态导致超额冻结。
-    try {
-      await creditService.freeze(userId, creditCost, {
-        reason: '提交生图任务',
-        relatedType: 'job',
+    if (mock) {
+      const genJob = await prisma.generationJob.create({
+        data: {
+          userId,
+          projectId: projectId || null,
+          provider: 'local',
+          model: 'mock-image',
+          jobType: 'image_generation',
+          status: 'succeeded',
+          prompt: safePrompt,
+          requestJson: { count: 1, ratio, size, creditUnitCost: 0, requiredVisibleTexts, mock: true },
+          creditsFrozen: 0,
+          creditsConsumed: 0,
+          startedAt: new Date(),
+          finishedAt: new Date(),
+        },
       })
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      if (msg.includes('不足')) {
-        return res.status(400).json({
-          code: 400,
-          message: `可用积分不足，本次生图需要 ${creditCost} 积分`,
-          data: null,
+      const buffer = await createMockImage(safePrompt, requiredVisibleTexts)
+      const { filename, url } = await saveBuffer(buffer, 'png')
+      const asset = await prisma.asset.create({
+        data: {
+          userId,
+          projectId: projectId || null,
+          generationJobId: genJob.id,
+          type: 'generated_design',
+          storageKey: filename,
+          url,
+          mimeType: 'image/png',
+          size: buffer.length,
+          metadataJson: { prompt: safePrompt, model: 'mock-image', ratio, source: 'mock' },
+        },
+      })
+      await prisma.generationJob.update({
+        where: { id: genJob.id },
+        data: { responseJson: { taskId: 'mock', results: [{ assetId: asset.id, url: asset.url }] } as any },
+      })
+      return res.json({ code: 0, message: 'ok', data: { jobId: genJob.id, status: 'succeeded' } })
+    }
+
+    // 直接冻结积分：freeze 在数据库事务内（行锁）校验余额，
+    // 避免「先 getBalance 再 freeze」之间的 TOCTOU 竞态导致超额冻结。
+    // 余额不足时 creditService 抛 InsufficientBalanceError（AppError, 400），全局错误处理直接返回 400（F7）。
+    if (creditCost > 0) {
+      try {
+        await creditService.freeze(userId, creditCost, {
+          reason: '提交生图任务',
+          relatedType: 'job',
         })
+      } catch (err) {
+        return next(err)
       }
-      return next(err)
     }
 
     // 创建 GenerationJob 记录
@@ -81,7 +189,7 @@ router.post('/', authMiddleware, async (req: Request, res: Response, next: NextF
         jobType: 'image_generation',
         status: 'queued',
         prompt: safePrompt,
-        requestJson: { count: n, ratio, size },
+        requestJson: { count: n, ratio, size, creditUnitCost: imageCreditCost, requiredVisibleTexts },
         creditsFrozen: creditCost,
       },
     })
@@ -157,6 +265,78 @@ router.get('/:id', authMiddleware, async (req: Request, res: Response, next: Nex
         results,
       },
     })
+  } catch (err) {
+    return next(err)
+  }
+})
+
+router.post('/:id/text-validation', authMiddleware, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params
+    const userId = req.user!.id
+    const job = await prisma.generationJob.findFirst({ where: { id, userId } })
+    if (!job) {
+      return res.status(404).json({ code: 404, message: '任务不存在或无权访问', data: null })
+    }
+    if (job.status !== 'succeeded') {
+      return res.status(409).json({ code: 409, message: '文字校验需要任务已完成', data: null })
+    }
+    const reqJson = requestObject(job.requestJson)
+    const expectedTexts = normalizeRequiredVisibleTexts(reqJson.requiredVisibleTexts)
+    const sourceAsset = await getSourceAsset(job.id, job.jobType)
+    const textValidation = await textValidationService.validate(expectedTexts, sourceAsset)
+    const nextResponse = { ...responseObject(job.responseJson), textValidation }
+    const updated = await prisma.generationJob.update({
+      where: { id: job.id },
+      data: { responseJson: nextResponse as any },
+    })
+    return res.json({ code: 0, message: 'ok', data: { job: updated, textValidation } })
+  } catch (err) {
+    return next(err)
+  }
+})
+
+router.post('/:id/text-corrections', authMiddleware, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params
+    const userId = req.user!.id
+    const job = await prisma.generationJob.findFirst({ where: { id, userId } })
+    if (!job) {
+      return res.status(404).json({ code: 404, message: '任务不存在或无权访问', data: null })
+    }
+    if (job.status !== 'succeeded') {
+      return res.status(409).json({ code: 409, message: '文字重绘需要任务已完成', data: null })
+    }
+
+    const reqJson = requestObject(job.requestJson)
+    const resJson = responseObject(job.responseJson)
+    const expectedTexts = normalizeRequiredVisibleTexts(reqJson.requiredVisibleTexts)
+    const sourceAsset = await getSourceAsset(job.id, job.jobType)
+    if (!sourceAsset) {
+      return res.status(409).json({ code: 409, message: '未找到可重绘的本地图片素材', data: null })
+    }
+
+    const result = await textCorrectionService.apply({
+      userId,
+      projectId: job.projectId,
+      generationJobId: job.id,
+      sourceAsset,
+      expectedTexts,
+      textValidation: resJson.textValidation as TextValidationRecord | undefined,
+      corrections: Array.isArray(req.body?.corrections) ? req.body.corrections : [],
+    })
+    const existingCorrectedAssets = Array.isArray(resJson.correctedAssets) ? resJson.correctedAssets : []
+    const correctedAssets = [...existingCorrectedAssets, result.asset].slice(-5)
+    const nextResponse = {
+      ...resJson,
+      textCorrections: result.corrections,
+      correctedAssets,
+    }
+    const updated = await prisma.generationJob.update({
+      where: { id: job.id },
+      data: { responseJson: nextResponse as any },
+    })
+    return res.json({ code: 0, message: 'ok', data: { job: updated, asset: result.asset } })
   } catch (err) {
     return next(err)
   }

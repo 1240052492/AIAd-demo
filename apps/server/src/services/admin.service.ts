@@ -1,5 +1,5 @@
 import { prisma, imageQueue, compositionQueue } from '../config'
-import { NotFoundError, ValidationError } from '../utils/errors'
+import { NotFoundError, ValidationError, InsufficientBalanceError } from '../utils/errors'
 import { PaginatedResponse } from '../types/common'
 import { parsePagination, toPaginated } from '../utils/pagination'
 
@@ -118,7 +118,7 @@ export class AdminService {
     return user
   }
 
-  /** 调整用户积分 */
+  /** 调整用户积分（原子：条件更新，扣减时要求余额充足，杜绝负余额 / 竞态） */
   async adjustCredits(
     userId: string,
     operatorId: string,
@@ -131,29 +131,29 @@ export class AdminService {
     const account = await prisma.creditAccount.findUnique({ where: { userId } })
     if (!account) throw new NotFoundError('用户积分账户不存在')
 
-    const balanceAfter = account.balance + amount
-    if (balanceAfter < 0) {
-      throw new ValidationError('积分余额不足，无法扣减到负数')
+    // 条件更新：扣减（amount<0）时要求 balance >= -amount；增加（amount>0）时无下限约束。
+    // 单条 UPDATE 自带行锁，避免「读后改」竞态导致的负余额 / 双花。
+    const minBalance = amount < 0 ? -amount : 0
+    const result = await prisma.creditAccount.updateMany({
+      where: { userId, balance: { gte: minBalance } },
+      data: { balance: { increment: amount } },
+    })
+    if (result.count === 0) {
+      throw new InsufficientBalanceError('积分余额不足，无法扣减到负数')
     }
-
-    const [updated] = await prisma.$transaction([
-      prisma.creditAccount.update({
-        where: { userId },
-        data: { balance: balanceAfter },
-      }),
-      prisma.creditTransaction.create({
-        data: {
-          userId,
-          accountId: account.id,
-          type: 'admin_adjust',
-          amount,
-          balanceAfter,
-          reason: reason || '管理员调整',
-          operatorId,
-        },
-      }),
-    ])
-    return { balance: updated.balance }
+    const updated = await prisma.creditAccount.findUnique({ where: { userId } })
+    await prisma.creditTransaction.create({
+      data: {
+        userId,
+        accountId: account.id,
+        type: 'admin_adjust',
+        amount,
+        balanceAfter: updated!.balance,
+        reason: reason || '管理员调整',
+        operatorId,
+      },
+    })
+    return { balance: updated!.balance }
   }
 
   /** 任务列表（分页 + 状态筛选） */

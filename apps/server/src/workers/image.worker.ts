@@ -135,7 +135,8 @@ const imageWorker = new Worker(
   'image-generation',
   async (job: Job) => {
     const { jobId, userId, projectId, prompt, count, model, size, ratio, creditsFrozen } = job.data
-    const credits = Number(creditsFrozen) || count * 2
+    const parsedCredits = Number(creditsFrozen)
+    const credits = Number.isFinite(parsedCredits) ? parsedCredits : count * 2
 
     try {
       // 1. 更新状态为 processing
@@ -188,6 +189,7 @@ const imageWorker = new Worker(
           data: {
             userId,
             projectId: projectId || null,
+            generationJobId: jobId,
             type: 'generated_design',
             storageKey: filename,
             url,
@@ -198,8 +200,24 @@ const imageWorker = new Worker(
         assets.push({ assetId: asset.id, url })
       }
 
-      // 5. 更新任务为成功并扣减积分（失败不再静默丢弃，走补偿链路）
+      // 5. 扣减冻结积分（同步，先于标记成功）——避免「先标记成功再异步扣减」窗口期内的白嫖（F4）。
+      //    扣减失败（冻结余额异常等）则标记任务失败并向上抛，由失败补偿链路处理冻结积分。
       emitProgress(jobId, 'saving', 90)
+      if (credits > 0) {
+        try {
+          await creditService.consume(userId, credits, {
+            reason: '生图任务完成',
+            relatedType: 'job',
+            relatedId: jobId,
+          })
+        } catch (consumeErr) {
+          await markJobFailedWithRetry(jobId, {
+            finishedAt: new Date(),
+            errorMessage: consumeErr instanceof Error ? consumeErr.message : String(consumeErr),
+          }).catch(() => {})
+          throw consumeErr
+        }
+      }
       await prisma.generationJob.update({
         where: { id: jobId },
         data: {
@@ -209,23 +227,44 @@ const imageWorker = new Worker(
           creditsConsumed: credits,
         },
       })
-      await enqueueCreditCompensation({
-        type: 'consume',
-        userId,
-        credits,
-        reason: '生图任务完成',
-        relatedType: 'job',
-        relatedId: jobId,
-      })
 
       emitProgress(jobId, 'done', 100)
       return { status: 'succeeded', results: assets }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
-      // 失败：更新状态（有界重试，仍失败则 re-throw 让 BullMQ 重试任务）+ 释放冻结积分（走补偿链路）
-      await markJobFailedWithRetry(jobId, { finishedAt: new Date(), errorMessage: msg }).catch(async (dbErr) => {
-        // 仅当 DB 更新彻底失败才会到这里；原错误已 console.error，继续补偿并向上抛
+      // 失败：先同步标记失败（有界重试），再同步释放冻结积分（F4）。
+      // 两步均失败时才退回补偿队列（best-effort），避免「标记成功但扣减丢失」式的资金泄漏。
+      try {
+        await markJobFailedWithRetry(jobId, { finishedAt: new Date(), errorMessage: msg })
+      } catch (dbErr) {
         if (credits > 0) {
+          try {
+            await creditService.refund(userId, credits, {
+              reason: '生图失败退回积分',
+              relatedType: 'job',
+              relatedId: jobId,
+            })
+          } catch {
+            await enqueueCreditCompensation({
+              type: 'refund',
+              userId,
+              credits,
+              reason: '生图失败退回积分',
+              relatedType: 'job',
+              relatedId: jobId,
+            })
+          }
+        }
+        throw dbErr
+      }
+      if (credits > 0) {
+        try {
+          await creditService.refund(userId, credits, {
+            reason: '生图失败退回积分',
+            relatedType: 'job',
+            relatedId: jobId,
+          })
+        } catch {
           await enqueueCreditCompensation({
             type: 'refund',
             userId,
@@ -235,17 +274,6 @@ const imageWorker = new Worker(
             relatedId: jobId,
           })
         }
-        throw dbErr
-      })
-      if (credits > 0) {
-        await enqueueCreditCompensation({
-          type: 'refund',
-          userId,
-          credits,
-          reason: '生图失败退回积分',
-          relatedType: 'job',
-          relatedId: jobId,
-        })
       }
       emitProgress(jobId, 'failed', 100, msg)
       throw err
@@ -262,7 +290,8 @@ const compositionWorker = new Worker(
   async (job: Job) => {
     const { jobId, userId, projectId, environmentAssetId, designAssetId, position, outputFormat, creditsFrozen } =
       job.data
-    const credits = Number(creditsFrozen) || 1
+    const parsedCredits = Number(creditsFrozen)
+    const credits = Number.isFinite(parsedCredits) ? parsedCredits : 1
 
     try {
       await prisma.generationJob.update({
@@ -286,9 +315,25 @@ const compositionWorker = new Worker(
           position,
           outputFormat: outputFormat === 'jpeg' ? 'jpeg' : 'png',
         },
-        { userId, projectId },
+        { userId, projectId, generationJobId: jobId },
       )
 
+      // 扣减冻结积分（同步，先于标记成功），失败则标记失败并向上抛（F4）
+      if (credits > 0) {
+        try {
+          await creditService.consume(userId, credits, {
+            reason: '环境合成完成',
+            relatedType: 'job',
+            relatedId: jobId,
+          })
+        } catch (consumeErr) {
+          await markJobFailedWithRetry(jobId, {
+            finishedAt: new Date(),
+            errorMessage: consumeErr instanceof Error ? consumeErr.message : String(consumeErr),
+          }).catch(() => {})
+          throw consumeErr
+        }
+      }
       await prisma.generationJob.update({
         where: { id: jobId },
         data: {
@@ -298,21 +343,43 @@ const compositionWorker = new Worker(
           creditsConsumed: credits,
         },
       })
-      await enqueueCreditCompensation({
-        type: 'consume',
-        userId,
-        credits,
-        reason: '环境合成完成',
-        relatedType: 'job',
-        relatedId: jobId,
-      })
 
       emitProgress(jobId, 'done', 100)
       return { status: 'succeeded', assetId: result.assetId, url: result.url }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
-      await markJobFailedWithRetry(jobId, { finishedAt: new Date(), errorMessage: msg }).catch(async (dbErr) => {
+      // 失败：先同步标记失败（有界重试），再同步释放冻结积分（F4）；两步均失败才退回补偿队列。
+      try {
+        await markJobFailedWithRetry(jobId, { finishedAt: new Date(), errorMessage: msg })
+      } catch (dbErr) {
         if (credits > 0) {
+          try {
+            await creditService.refund(userId, credits, {
+              reason: '环境合成失败退回积分',
+              relatedType: 'job',
+              relatedId: jobId,
+            })
+          } catch {
+            await enqueueCreditCompensation({
+              type: 'refund',
+              userId,
+              credits,
+              reason: '环境合成失败退回积分',
+              relatedType: 'job',
+              relatedId: jobId,
+            })
+          }
+        }
+        throw dbErr
+      }
+      if (credits > 0) {
+        try {
+          await creditService.refund(userId, credits, {
+            reason: '环境合成失败退回积分',
+            relatedType: 'job',
+            relatedId: jobId,
+          })
+        } catch {
           await enqueueCreditCompensation({
             type: 'refund',
             userId,
@@ -322,17 +389,6 @@ const compositionWorker = new Worker(
             relatedId: jobId,
           })
         }
-        throw dbErr
-      })
-      if (credits > 0) {
-        await enqueueCreditCompensation({
-          type: 'refund',
-          userId,
-          credits,
-          reason: '环境合成失败退回积分',
-          relatedType: 'job',
-          relatedId: jobId,
-        })
       }
       emitProgress(jobId, 'failed', 100, msg)
       throw err

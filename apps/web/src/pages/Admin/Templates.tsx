@@ -1,7 +1,7 @@
 import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import { Plus, Pencil, Trash2, ImageOff } from 'lucide-react'
-import { templateApi } from '@/services/api'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { Plus, Pencil, Trash2, ImageOff, Loader2, AlertTriangle } from 'lucide-react'
+import { adminConfigApi } from '@/services/admin-config.api'
 import { TEMPLATE_CATEGORIES, type Template } from '@/types'
 import { DataTable, type Column } from '@/components/admin/DataTable'
 import { Tag } from '@/components/ui/Tag'
@@ -27,13 +27,12 @@ const emptyForm: FormState = {
 }
 
 export function TemplatesPanel() {
-  const { data, isLoading } = useQuery({
-    queryKey: ['admin', 'templates'],
-    queryFn: () => templateApi.list({ page: 1, pageSize: 50 }),
+  const qc = useQueryClient()
+  const { data, isLoading, isError } = useQuery({
+    queryKey: ['admin-config', 'templates'],
+    queryFn: () => adminConfigApi.listAdminTemplates({ page: 1, pageSize: 100 }),
   })
-
-  const [items, setItems] = useState<Template[] | null>(null)
-  const list = items ?? data?.data.items ?? []
+  const list = data?.items ?? []
   const [editing, setEditing] = useState<FormState | null>(null)
 
   const openNew = () => setEditing({ ...emptyForm })
@@ -47,25 +46,34 @@ export function TemplatesPanel() {
       prompt: t.prompt,
     })
 
-  const save = () => {
-    if (!editing) return
-    const base: Template = {
-      id: editing.id ?? `t_${Date.now()}`,
-      title: editing.title || '未命名模板',
-      category: editing.category,
-      businessType: editing.businessType,
-      coverUrl: editing.coverUrl || undefined,
-      prompt: editing.prompt,
-    }
-    if (editing.id) {
-      setItems((prev) => (prev ?? list).map((t) => (t.id === base.id ? base : t)))
-    } else {
-      setItems([base, ...(items ?? list)])
-    }
-    setEditing(null)
-  }
+  const saveMut = useMutation({
+    mutationFn: async () => {
+      if (!editing) return
+      const payload = {
+        title: editing.title || '未命名模板',
+        category: editing.category,
+        businessType: editing.businessType,
+        coverUrl: editing.coverUrl || undefined,
+        prompt: editing.prompt,
+      }
+      if (editing.id) await adminConfigApi.updateAdminTemplate(editing.id, payload)
+      else await adminConfigApi.createAdminTemplate(payload)
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['admin-config', 'templates'] })
+      qc.invalidateQueries({ queryKey: ['admin-config', 'templates-pool'] })
+      setEditing(null)
+    },
+  })
+  const removeMut = useMutation({
+    mutationFn: (id: string) => adminConfigApi.deleteAdminTemplate(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin-config', 'templates'] }),
+  })
 
-  const remove = (id: string) => setItems((prev) => (prev ?? list).filter((t) => t.id !== id))
+  const save = () => saveMut.mutate()
+  const remove = (id: string) => {
+    if (confirm('确认删除该模板？')) removeMut.mutate(id)
+  }
 
   const columns: Column<Template>[] = [
     {
@@ -104,15 +112,21 @@ export function TemplatesPanel() {
   ]
 
   return (
-    <div className="space-y-5">
-      <div className="flex items-center justify-between">
-        <PageHeader title="模板 / 提示词库" desc="管理广告流程模板及其提示词内容" />
-        <button className="btn-primary" onClick={openNew}>
-          <Plus size={15} /> 新增模板
-        </button>
-      </div>
+      <div className="space-y-5">
+        <div className="flex items-center justify-between">
+          <PageHeader title="模板 / 提示词库" desc="管理广告流程模板及其提示词内容（含非公开，真实数据）" />
+          <button className="btn-primary" onClick={openNew}>
+            <Plus size={15} /> 新增模板
+          </button>
+        </div>
 
-      <DataTable columns={columns} data={list} loading={isLoading} rowKey={(r) => r.id} emptyText="暂无模板" />
+        {isError && (
+          <div className="flex items-center gap-2 rounded-btn border border-red/30 bg-red/8 px-4 py-3 text-sm text-red">
+            <AlertTriangle size={15} /> 模板加载失败，请稍后重试。
+          </div>
+        )}
+
+        <DataTable columns={columns} data={list} loading={isLoading} rowKey={(r) => r.id} emptyText="暂无模板" />
 
       <Dialog
         open={!!editing}
@@ -121,7 +135,9 @@ export function TemplatesPanel() {
         footer={
           <>
             <button className="btn-secondary" onClick={() => setEditing(null)}>取消</button>
-            <button className="btn-primary" onClick={save}>保存</button>
+            <button className="btn-primary" disabled={saveMut.isPending} onClick={save}>
+              {saveMut.isPending ? <Loader2 size={15} className="animate-spin" /> : '保存'}
+            </button>
           </>
         }
       >

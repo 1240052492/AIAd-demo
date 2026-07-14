@@ -17,7 +17,8 @@
     "db:import-templates": "tsx scripts/import-templates.ts",
     "db:generate": "prisma generate",
     "migrate:deploy": "prisma migrate deploy",
-    "worker:start": "tsx src/workers/image.worker.ts"
+    "worker:start": "tsx src/workers/image.worker.ts",
+    "worker:prod": "node dist/workers/image.worker.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.27.0",
