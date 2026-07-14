@@ -1,5 +1,6 @@
 import { prisma } from '../config'
 import { creditService } from './credit.service'
+import { roleConfigService } from './role-config.service'
 import { NotFoundError, ValidationError } from '../utils/errors'
 
 /**
@@ -25,22 +26,33 @@ export class RechargeService {
     return 50
   }
 
-  /** 创建充值订单（pending） */
-  async createOrder(userId: string, amountCents: number, payChannel = 'manual') {
-    if (!Number.isInteger(amountCents) || amountCents <= 0) {
+  private async getUserRoleCodes(userId: string): Promise<string[]> {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { roles: { select: { role: { select: { code: true } } } } },
+    })
+    return user?.roles.map((item) => item.role.code) ?? []
+  }
+
+  /** 创建充值订单（pending）。amount 记录折扣后的应付金额，points 按积分包原价计算。 */
+  async createOrder(userId: string, listAmountCents: number, payChannel = 'manual') {
+    if (!Number.isInteger(listAmountCents) || listAmountCents <= 0) {
       throw new ValidationError('充值金额必须为正整数（单位：分）')
     }
-    if (amountCents > 100000000) throw new ValidationError('充值金额过大')
-    const basePoints = Math.floor((amountCents / 100) * this.ratio)
+    if (listAmountCents > 100000000) throw new ValidationError('充值金额过大')
+    const roleCodes = await this.getUserRoleCodes(userId)
+    const rate = await roleConfigService.getEffectiveRate(roleCodes)
+    const payableAmountCents = Math.max(1, Math.ceil(listAmountCents * rate))
+    const basePoints = Math.floor((listAmountCents / 100) * this.ratio)
     const hadRecharge = await prisma.rechargeOrder.count({ where: { userId, status: 'paid' } })
     const bonus = hadRecharge === 0 ? this.firstRechargeBonus : 0
     const order = await prisma.rechargeOrder.create({
       data: {
         userId,
         orderNo: genOrderNo(),
-        amount: amountCents,
+        amount: payableAmountCents,
         points: basePoints + bonus,
-        rate: 1,
+        rate,
         payChannel,
         status: 'pending',
       },

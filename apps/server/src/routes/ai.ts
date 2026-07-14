@@ -1,5 +1,5 @@
 import { Router, Request, Response, NextFunction } from 'express'
-import { authMiddleware } from '../middleware/auth'
+import { requirePermission } from '../middleware/auth'
 import { AnthropicService, type GenerateBriefResult } from '../services/ai/anthropic.service'
 import { PromptService } from '../services/ai/prompt.service'
 import { WorkflowEngine } from '../services/ai/workflow.engine'
@@ -38,7 +38,7 @@ function logCreditError(action: string, userId: string, err: unknown): void {
  * POST /api/ai/brief
  * 生成广告 Brief。消耗 1 积分（先冻结，成功后扣减，失败则退回）。
  */
-router.post('/brief', authMiddleware, async (req: Request, res: Response, next: NextFunction) => {
+router.post('/brief', requirePermission('canGenerate'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { businessType, clientText, constraints } = req.body ?? {}
     if (!businessType || typeof businessType !== 'string' || !businessType.trim()) {
@@ -133,7 +133,7 @@ router.post('/brief', authMiddleware, async (req: Request, res: Response, next: 
  * POST /api/ai/prompt
  * 基于 Brief 优化生图提示词。消耗 1 积分。
  */
-router.post('/prompt', authMiddleware, async (req: Request, res: Response, next: NextFunction) => {
+router.post('/prompt', requirePermission('canGenerate'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { brief, stylePreference } = req.body ?? {}
     if (!brief) {
@@ -203,7 +203,7 @@ router.post('/prompt', authMiddleware, async (req: Request, res: Response, next:
  * 执行完整的 Agency Workflow Skills 6 步流程。
  * 文本步骤（AE / 策略 / 创意 / BOSS）共冻结 4 积分；异步步骤（生图 / 合成）由 Worker 单独计费。
  */
-router.post('/workflows/run', authMiddleware, async (req: Request, res: Response, next: NextFunction) => {
+router.post('/workflows/run', requirePermission('canGenerate'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { projectId, userInput } = req.body ?? {}
     if (!projectId || typeof projectId !== 'string' || !projectId.trim()) {

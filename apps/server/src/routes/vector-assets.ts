@@ -1,5 +1,5 @@
 import { Router, Request, Response, NextFunction } from 'express'
-import { authMiddleware } from '../middleware/auth'
+import { requirePermission } from '../middleware/auth'
 import { prisma } from '../config'
 import { creditService } from '../services/credit.service'
 import { creditRuleService } from '../services/credit-rule.service'
@@ -11,7 +11,7 @@ function isUnsafeSvg(svg: string): boolean {
   return /<script[\s>]/i.test(svg) || /\son[a-z]+\s*=/i.test(svg) || /javascript:/i.test(svg)
 }
 
-router.post('/', authMiddleware, async (req: Request, res: Response, next: NextFunction) => {
+router.post('/', requirePermission('canExport'), async (req: Request, res: Response, next: NextFunction) => {
   const userId = req.user!.id
   let frozen = 0
   try {

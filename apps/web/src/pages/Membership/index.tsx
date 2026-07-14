@@ -69,12 +69,12 @@ function PlanCard({
       </div>
 
       <button
-        disabled={purchasing}
+        disabled
         onClick={() => onPurchase(plan)}
-        className="btn-primary mt-1 flex items-center justify-center gap-2"
+        className="btn-primary mt-1 flex items-center justify-center gap-2 opacity-60"
       >
         {purchasing ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />}
-        {plan.isActive ? '开通 / 购买' : '暂不可售'}
+        {plan.isActive ? '联系管理员开通' : '暂不可售'}
       </button>
     </div>
   )
@@ -177,14 +177,14 @@ export default function MembershipPage() {
             ) : (
               <>
                 <p className="text-sm font-semibold text-text">未开通会员</p>
-                <p className="text-xs text-muted">开通会员即可享受倍率权益与积分赠送</p>
+                <p className="text-xs text-muted">本期暂不开放在线支付，请联系管理员开通会员或调整积分</p>
               </>
             )}
           </div>
         </div>
         <div className="flex items-center gap-2 text-sm text-muted">
           <ShieldCheck size={15} />
-          {current ? '会员权益生效中' : '点击「开通 / 购买」立即升级'}
+          {current ? '会员权益生效中' : '在线支付待开通'}
         </div>
       </section>
 
@@ -245,11 +245,11 @@ export default function MembershipPage() {
             </div>
           )}
 
-          {/* 演示充值（立即到账，无需真实支付） */}
+          {/* 在线支付未开通：禁止客户端自助模拟到账 */}
           <section className="panel-card p-5">
             <header className="mb-3 flex items-center gap-2">
               <Coins size={16} className="text-amber" />
-              <h2 className="text-sm font-semibold text-text">积分充值（演示）</h2>
+              <h2 className="text-sm font-semibold text-text">积分充值</h2>
             </header>
             <div className="flex flex-wrap items-center gap-3">
               {[2900, 9900, 29900].map((amt) => (
@@ -275,15 +275,15 @@ export default function MembershipPage() {
                 className="h-9 w-32 rounded-btn border border-border bg-panel px-3 text-sm text-text outline-none focus:border-blue/60"
               />
               <button
-                disabled={rechargeMut.isPending || rechargeAmount < 100}
-                onClick={() => rechargeMut.mutate(rechargeAmount)}
-                className="btn-primary flex items-center gap-2"
+                disabled
+                onClick={() => undefined}
+                className="btn-primary flex items-center gap-2 opacity-60"
               >
                 {rechargeMut.isPending ? <Loader2 size={15} className="animate-spin" /> : <Coins size={15} />}
-                充值 {formatYuan(rechargeAmount)}
+                联系管理员充值
               </button>
             </div>
-            <p className="mt-2 text-xs text-muted">演示环境：充值后立即到账等额积分，不经过真实支付。</p>
+            <p className="mt-2 text-xs text-muted">在线支付尚未开通，本期由后台管理员手动调整积分。</p>
           </section>
         </div>
       )}

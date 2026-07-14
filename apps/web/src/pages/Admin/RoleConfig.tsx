@@ -66,7 +66,7 @@ export function RoleConfigPanel() {
   if (isLoading) {
     return (
       <div className="space-y-5">
-        <PageHeader title="角色权限配置" desc="配置各角色的积分消耗系数与功能权限" />
+        <PageHeader title="角色权限配置" desc="配置各角色的充值付款系数与功能权限" />
         <div className="flex items-center gap-2 py-10 text-muted">
           <Loader2 size={16} className="animate-spin" /> 加载中…
         </div>
@@ -78,18 +78,18 @@ export function RoleConfigPanel() {
     <div className="space-y-5">
       <PageHeader
         title="角色权限配置"
-        desc="配置各角色的积分消耗系数（rate）与功能权限，保存后即时生效于服务端"
+        desc="配置各角色的充值付款系数（rate）与功能权限，保存后即时生效于服务端"
       />
 
       <div className="flex items-start gap-2 rounded-btn border border-blue/30 bg-blue/8 px-4 py-3 text-sm text-text">
         <Info size={16} className="mt-0.5 shrink-0 text-blue" />
         <p className="text-muted">
-          <span className="font-medium text-text">rate（消耗系数）</span>
-          作用于积分消耗：用户实际扣减 = 基准积分 × 角色 rate。例如将
+          <span className="font-medium text-text">rate（付款系数）</span>
+          作用于积分充值付款金额：用户实际付款 = 标准金额 × 角色 rate。例如将
           <span className="font-mono text-text"> agent </span>
           设为
           <span className="font-mono text-text"> 0.7 </span>
-          ，则其每次生成 / 合成仅消耗 70% 积分（即 30% 折扣）。设为 1 表示原价。
+          ，则代理商购买同等积分时按 70% 付款。生成 / 合成 / 导出仍按标准积分扣减。设为 1 表示原价。
         </p>
       </div>
 
@@ -110,7 +110,7 @@ export function RoleConfigPanel() {
                   <p className="mt-0.5 text-xs text-muted">功能权限开关</p>
                 </div>
                 <div className="flex items-center gap-1.5">
-                  <span className="text-xs text-muted">消耗系数 rate</span>
+                  <span className="text-xs text-muted">付款系数 rate</span>
                   <input
                     type="number"
                     step={0.1}

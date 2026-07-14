@@ -1,9 +1,8 @@
 import { Router, Request, Response, NextFunction } from 'express'
-import { authMiddleware } from '../middleware/auth'
+import { requirePermission } from '../middleware/auth'
 import { prisma, compositionQueue, env } from '../config'
 import { creditService } from '../services/credit.service'
 import { creditRuleService } from '../services/credit-rule.service'
-import { roleConfigService } from '../services/role-config.service'
 
 const router = Router()
 
@@ -49,7 +48,7 @@ function normalizeRequiredVisibleTexts(value: unknown): string[] {
     .slice(0, 8)
 }
 
-router.post('/', authMiddleware, async (req: Request, res: Response, next: NextFunction) => {
+router.post('/', requirePermission('canCompose'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { projectId, environmentAssetId, designAssetId } = req.body ?? {}
     const userId = req.user!.id
@@ -92,9 +91,7 @@ router.post('/', authMiddleware, async (req: Request, res: Response, next: NextF
       return res.status(404).json({ code: 404, message: '设计原图不存在或无权访问', data: null })
     }
 
-    const baseCost = await creditRuleService.getCost('composition')
-    const roleRate = await roleConfigService.getEffectiveRate(req.user!.roles ?? [])
-    const creditCost = Math.ceil(baseCost * roleRate)
+    const creditCost = await creditRuleService.getCost('composition')
     if (creditCost > 0) {
       try {
         await creditService.freeze(userId, creditCost, {

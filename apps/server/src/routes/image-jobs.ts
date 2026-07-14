@@ -1,10 +1,9 @@
 import { Router, Request, Response, NextFunction } from 'express'
 import sharp from 'sharp'
-import { authMiddleware } from '../middleware/auth'
+import { authMiddleware, requirePermission } from '../middleware/auth'
 import { prisma, imageQueue, env } from '../config'
 import { creditService } from '../services/credit.service'
 import { creditRuleService } from '../services/credit-rule.service'
-import { roleConfigService } from '../services/role-config.service'
 import { textValidationService, TextValidationRecord } from '../services/ai/text-validation.service'
 import { textCorrectionService } from '../services/ai/text-correction.service'
 import { saveBuffer } from '../utils/storage'
@@ -92,7 +91,7 @@ async function createMockImage(prompt: string, requiredVisibleTexts: string[]) {
  * POST /api/image-jobs
  * 提交异步生图任务：校验并冻结积分 -> 创建 GenerationJob -> 入 BullMQ 队列。
  */
-router.post('/', authMiddleware, async (req: Request, res: Response, next: NextFunction) => {
+router.post('/', requirePermission('canGenerate'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { projectId, prompt, count, ratio, model } = req.body ?? {}
     if (!prompt || typeof prompt !== 'string' || !prompt.trim()) {
@@ -121,9 +120,9 @@ router.post('/', authMiddleware, async (req: Request, res: Response, next: NextF
     const size = resolveSize(ratio)
     const imageCreditCost = await creditRuleService.getCost('imageGeneration')
     const mock = req.body?.mock === true
-    // 服务端强制应用角色消费倍率（代理 0.7 等），前端无法绕过
-    const roleRate = await roleConfigService.getEffectiveRate(req.user!.roles ?? [])
-    const creditCost = mock ? 0 : Math.ceil(n * imageCreditCost * roleRate)
+    const creditCost = mock ? 0 : n * imageCreditCost
+    // 生成消耗按积分规则标准扣减；代理 0.7 仅用于充值付款金额，不影响消费积分。
+    const creditCost = mock ? 0 : n * imageCreditCost
     const requiredVisibleTexts = normalizeRequiredVisibleTexts(req.body?.requiredVisibleTexts)
 
     if (mock) {

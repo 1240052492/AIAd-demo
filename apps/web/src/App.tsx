@@ -28,6 +28,21 @@ function Protected({ children }: { children: ReactNode }) {
   return <>{children}</>
 }
 
+function hasAdminRole(user: ReturnType<typeof useAuthStore.getState>['user']): boolean {
+  if (!user) return false
+  if (user.role === 'admin') return true
+  return !!user.roles?.some((item) => item?.role?.code === 'admin')
+}
+
+function AdminOnly({ children }: { children: ReactNode }) {
+  const restored = useAuthStore((s) => s.restored)
+  const user = useAuthStore((s) => s.user)
+  if (!restored) return <FullScreenLoader />
+  if (!user) return <Navigate to="/login" replace />
+  if (!hasAdminRole(user)) return <Navigate to="/" replace />
+  return <>{children}</>
+}
+
 function FullScreenLoader() {
   return (
     <div className="flex h-screen w-screen items-center justify-center bg-slate-50">
@@ -62,7 +77,7 @@ export default function App() {
         {/* 携带图生图编辑器：?seedImg=<url>&polishPrompt=<text> */}
         <Route path="/editor" element={<Protected><EditorPage /></Protected>} />
         <Route path="/editor/:projectId" element={<Protected><EditorPage /></Protected>} />
-        <Route path="/admin/*" element={<Protected><AdminPage /></Protected>} />
+        <Route path="/admin/*" element={<AdminOnly><AdminPage /></AdminOnly>} />
         {/* === AGENT_F1_ROUTES === 会员 / 积分 / 个人中心 */}
         <Route path="/membership" element={<Protected><MembershipPage /></Protected>} />
         <Route
@@ -74,7 +89,7 @@ export default function App() {
           element={<Protected><div className="mx-auto max-w-[1200px] px-6 py-6"><Profile /></div></Protected>}
         />
         {/* === AGENT_F3_ROUTES === */}
-        <Route path="/dashboard" element={<Protected><DashboardPage /></Protected>} />
+        <Route path="/dashboard" element={<AdminOnly><DashboardPage /></AdminOnly>} />
         {/* === AGENT_F3_ROUTES === */}
       </Route>
 

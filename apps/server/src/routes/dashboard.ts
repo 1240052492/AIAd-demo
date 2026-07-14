@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express'
-import { authMiddleware } from '../middleware/auth'
+import { requireAdmin } from '../middleware/auth'
 import { prisma } from '../config'
 import { ok, fail } from '../utils/response'
 
@@ -15,7 +15,7 @@ function startOfToday(): Date {
  * 返回系统真实聚合数据（全部来自数据库实时统计，不使用任何假数据）。
  * 普通用户看到自身维度；管理员看到全局维度（这里统一返回全局真实数据，前端按需展示）。
  */
-router.get('/', authMiddleware, async (req: Request, res: Response) => {
+router.get('/', requireAdmin, async (_req: Request, res: Response) => {
   try {
     const now = new Date()
     const todayStart = startOfToday()

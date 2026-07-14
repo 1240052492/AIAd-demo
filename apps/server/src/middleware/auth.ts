@@ -2,6 +2,8 @@ import { Request, Response, NextFunction } from 'express'
 import jwt from 'jsonwebtoken'
 import { env } from '../config'
 import { isBlacklisted } from '../utils/token-blacklist'
+import { prisma } from '../config'
+import { roleConfigService, type RolePermission } from '../services/role-config.service'
 
 /**
  * 已认证用户附加在 Request 上的信息
@@ -54,12 +56,6 @@ function extractToken(req: Request): string | null {
   return cookieToken ?? null
 }
 
-function buildRoles(payload: Record<string, unknown>): string[] {
-  if (Array.isArray(payload.roles)) return payload.roles as string[]
-  if (payload.role) return [payload.role as string]
-  return []
-}
-
 /**
  * JWT 鉴权中间件。
  * - token 来源：Authorization: Bearer <t> 或 cookie `access_token`
@@ -87,8 +83,20 @@ export async function authMiddleware(req: Request, res: Response, next: NextFunc
       }
     }
 
-    const roles = buildRoles(payload)
-    const role = (payload.role as string | undefined) ?? roles[0]
+    // 权限以数据库当前状态为准，JWT 中的角色只用于兼容旧令牌，不能作为授权依据。
+    // 这样管理员撤权、角色调整、账号禁用会立即生效，无需等待 access token 过期。
+    const currentUser = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { status: true, roles: { select: { role: { select: { code: true } } } } },
+    })
+    if (!currentUser) {
+      return res.status(401).json({ code: 401, message: '用户不存在，请重新登录', data: null })
+    }
+    if (currentUser.status !== 'active') {
+      return res.status(403).json({ code: 403, message: '账号已被禁用或封禁', data: null })
+    }
+    const roles = currentUser.roles.map((item) => item.role.code)
+    const role = roles[0]
     req.user = { id: userId, userId, role, roles }
     next()
   } catch {
@@ -116,10 +124,35 @@ function isAdmin(user?: AuthUser): boolean {
  * 管理员中间件：先鉴权，再校验 admin 角色。
  */
 export function requireAdmin(req: Request, res: Response, next: NextFunction) {
-  authMiddleware(req, res, () => {
+  authMiddleware(req, res, async () => {
     if (!isAdmin(req.user)) {
       return res.status(403).json({ code: 403, message: '需要管理员权限', data: null })
     }
-    next()
+    try {
+      const allowed = await roleConfigService.hasPermission(req.user!.roles ?? [], 'canAccessAdmin')
+      if (!allowed) {
+        return res.status(403).json({ code: 403, message: '管理员后台权限已关闭', data: null })
+      }
+      next()
+    } catch (err) {
+      next(err)
+    }
   })
+}
+
+/** 登录用户功能权限校验：多角色取权限合集，任一角色开启即允许。 */
+export function requirePermission(permission: keyof RolePermission) {
+  return (req: Request, res: Response, next: NextFunction) => {
+    authMiddleware(req, res, async () => {
+      try {
+        const allowed = await roleConfigService.hasPermission(req.user!.roles ?? [], permission)
+        if (!allowed) {
+          return res.status(403).json({ code: 403, message: '当前角色无此功能权限', data: null })
+        }
+        next()
+      } catch (err) {
+        next(err)
+      }
+    })
+  }
 }

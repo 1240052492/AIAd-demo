@@ -40,6 +40,7 @@ export default function EditorPage() {
 
   const [promptText, setPromptText] = useState<string>(() => polishPrompt)
   const [busy, setBusy] = useState(false)
+  const initialPromptRef = useRef(polishPrompt.trim())
   const seedLoaded = useRef(false)
 
   const {
@@ -88,8 +89,9 @@ export default function EditorPage() {
 
   // ===== 重新生成（门控：必须至少有 1 条标注批注）=====
   async function handleRegenerate() {
-    // 门控：未添加任何修改建议时直接拦截（按钮同时 disabled）
-    if (annotations.length === 0) {
+    const promptChanged = promptText.trim() !== initialPromptRef.current
+    // 门控：未修改提示词且未添加任何修改建议时直接拦截（按钮同时 disabled）
+    if (!promptChanged && annotations.length === 0) {
       return
     }
     setBusy(true)
@@ -131,7 +133,8 @@ export default function EditorPage() {
     { tool: 'text', label: '文字批注', icon: <Type className="h-4 w-4" /> },
   ]
 
-  const gateBlocked = annotations.length === 0
+  const promptChanged = promptText.trim() !== initialPromptRef.current
+  const gateBlocked = !promptChanged && annotations.length === 0
 
   return (
     <div className="flex h-screen flex-col bg-bg text-text">
@@ -258,7 +261,7 @@ export default function EditorPage() {
                   type="button"
                   onClick={handleRegenerate}
                   disabled={gateBlocked || busy}
-                  title={gateBlocked ? '请先添加至少一处修改批注（框选 / 箭头 / 文字）' : '根据批注重新生成'}
+                  title={gateBlocked ? '请先修改提示词，或添加至少一处修改批注' : '根据提示词和批注重新生成'}
                   className={cn(
                     'flex h-10 min-w-[140px] items-center justify-center gap-2 rounded-btn px-4 text-[13px] font-semibold transition',
                     gateBlocked
@@ -274,11 +277,11 @@ export default function EditorPage() {
             </div>
             {gateBlocked ? (
               <p className="mt-2 text-[12px] text-amber">
-                请先用上方「框选区域 / 箭头 / 文字批注」工具在图上给出至少一处修改建议，才能重新生成。
+                请先修改提示词，或用上方「框选区域 / 箭头 / 文字批注」工具在图上给出至少一处修改建议，才能重新生成。
               </p>
             ) : (
               <p className="mt-2 text-[12px] text-muted">
-                已添加 {annotations.length} 处修改批注，点击「重新生成」将连同提示词一起发送给生图接口。
+                {promptChanged ? '提示词已修改' : `已添加 ${annotations.length} 处修改批注`}，点击「重新生成」将连同提示词和批注一起发送给生图接口。
               </p>
             )}
           </div>

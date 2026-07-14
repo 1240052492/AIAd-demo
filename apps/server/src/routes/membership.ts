@@ -2,7 +2,6 @@ import { Router, Request, Response } from 'express'
 import { authMiddleware } from '../middleware/auth'
 import { membershipService } from '../services/membership.service'
 import { ok, fail } from '../utils/response'
-import { ValidationError } from '../utils/errors'
 
 const router = Router()
 
@@ -21,19 +20,9 @@ router.get('/mine', async (req: Request, res: Response) => {
   return ok(res, list)
 })
 
-// 购买套餐（演示：无支付网关，直接成功并发积分）
-router.post('/purchase', async (req: Request, res: Response) => {
-  try {
-    const { planCode } = req.body ?? {}
-    if (!planCode || typeof planCode !== 'string') {
-      return fail(res, 400, 'planCode 为必填项')
-    }
-    const result = await membershipService.purchasePlan(req.user!.id, planCode)
-    return ok(res, result, '购买成功，积分已到账')
-  } catch (err) {
-    if (err instanceof ValidationError) return fail(res, 400, err.message)
-    return fail(res, 500, (err as Error).message || '购买失败')
-  }
+// 未接支付网关前禁止直接发放套餐积分，避免普通用户免费刷积分。
+router.post('/purchase', async (_req: Request, res: Response) => {
+  return fail(res, 403, '会员购买尚未开放，请联系管理员')
 })
 
 export { router as membershipRoutes }

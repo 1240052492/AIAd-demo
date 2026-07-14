@@ -2,7 +2,6 @@ import { Router } from 'express'
 import { authMiddleware } from '../middleware/auth'
 import { CreditService } from '../services/credit.service'
 import { creditRuleService } from '../services/credit-rule.service'
-import { rechargeService } from '../services/recharge.service'
 import { ok, fail } from '../utils/response'
 
 const router = Router()
@@ -40,17 +39,10 @@ router.get('/transactions', authMiddleware, async (req, res, next) => {
   }
 })
 
-/** POST /api/credits/recharge - 创建并模拟支付，发放积分（真实数据测试用） */
+/** POST /api/credits/recharge - 第一阶段未接支付，禁止客户端自行模拟到账 */
 router.post('/recharge', authMiddleware, async (req, res, next) => {
   try {
-    const amount = Number(req.body?.amount)
-    if (!Number.isInteger(amount) || amount <= 0) {
-      return fail(res, 400, '充值金额必须为正整数（单位：分）')
-    }
-    const order = await rechargeService.createOrder(req.user!.id, amount)
-    const paid = await rechargeService.confirmPayment(order.orderNo, req.user!.id)
-    const balance = await creditService.getAccount(req.user!.id)
-    return ok(res, { order: paid, balance }, '充值成功，积分已到账')
+    return fail(res, 403, '在线充值尚未开放，请联系管理员调整积分')
   } catch (err) {
     next(err)
   }

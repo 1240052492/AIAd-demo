@@ -19,9 +19,6 @@ const TOP_NAV = [
   { label: '模板库', to: '/templates' },
   { label: '工作流库', to: '/workflows' },
   { label: '案例库', to: '/cases' },
-  // === AGENT_F3_ROUTES ===
-  { label: '数据总览', to: '/dashboard' },
-  // === AGENT_F3_ROUTES ===
 ]
 
 /** 左侧 Rail 导航项 */
@@ -52,6 +49,14 @@ function Avatar({ name }: { name?: string }) {
   )
 }
 
+function getRoleCodes(user: ReturnType<typeof useAuthStore.getState>['user']): string[] {
+  if (!user) return []
+  const fromRoles = Array.isArray(user.roles)
+    ? user.roles.map((item) => item.role?.code).filter((code): code is string => Boolean(code))
+    : []
+  return user.role ? Array.from(new Set([...fromRoles, user.role])) : fromRoles
+}
+
 export default function MainLayout() {
   const location = useLocation()
   const navigate = useNavigate()
@@ -59,6 +64,7 @@ export default function MainLayout() {
   const token = useAuthStore((s) => s.token)
   const logout = useAuthStore((s) => s.logout)
   const balance = useCreditStore((s) => s.balance)
+  const isAdmin = getRoleCodes(user).includes('admin')
 
   // 判断 Rail 是否高亮：根据当前路径前缀匹配
   const isRailActive = (to: string) =>
@@ -111,7 +117,7 @@ export default function MainLayout() {
 
           {/* 中：导航 */}
           <nav className="hidden items-center gap-1 md:flex">
-            {TOP_NAV.map((item) => (
+            {[...TOP_NAV, ...(isAdmin ? [{ label: '数据总览', to: '/dashboard' }] : [])].map((item) => (
               <NavLink
                 key={item.to}
                 to={item.to}

@@ -1,10 +1,10 @@
 import { prisma } from '../config'
 
 /**
- * 角色权限与消费倍率配置
+ * 角色权限与充值付款倍率配置
  *
  * 数据来源：role_configs 表（已种子数据）。服务端强制生效：
- * - rate：消费倍率（代理默认 0.7，即按 70% 扣积分）
+ * - rate：充值付款倍率（代理默认 0.7，即同等到账积分按 70% 付款）
  * - permissions：功能权限包（canGenerate / canAccessAdmin 等）
  * 前端任何"免积分/越权"绕过都无效，因为扣费与鉴权全部在后端完成。
  */
@@ -27,9 +27,9 @@ const DEFAULT_RATES: Record<string, number> = {
 }
 
 const DEFAULT_PERMISSIONS: Record<string, RolePermission> = {
-  guest: { canGenerate: true, canCompose: true, canAccessAdmin: false, canRecharge: false, canManageUsers: false },
-  user: { canGenerate: true, canCompose: true, canAccessAdmin: false, canRecharge: true, canManageUsers: false },
-  agent: { canGenerate: true, canCompose: true, canAccessAdmin: false, canRecharge: true, canManageUsers: false },
+  guest: { canGenerate: false, canCompose: false, canAccessAdmin: false, canRecharge: false, canManageUsers: false, canExport: false },
+  user: { canGenerate: true, canCompose: true, canAccessAdmin: false, canRecharge: false, canManageUsers: false },
+  agent: { canGenerate: true, canCompose: true, canAccessAdmin: false, canRecharge: false, canManageUsers: false },
   admin: { canGenerate: true, canCompose: true, canAccessAdmin: true, canRecharge: true, canManageUsers: true },
 }
 
@@ -68,14 +68,16 @@ export class RoleConfigService {
   }
 
   /**
-   * 取用户有效消费倍率：取其所有角色中最小倍率。
-   * 例如用户同时是 user(1) 与 agent(0.7)，生效 0.7（代理折扣）。
+   * 取用户有效充值付款倍率：取其所有角色中最小倍率。
+   * 例如用户同时是 user(1) 与 agent(0.7)，充值订单金额按 0.7 计算。
+   * 注意：生成 / 合成 / 导出等积分消耗不使用该倍率，始终按积分规则标准扣减。
    */
   async getEffectiveRate(roleCodes: string[]): Promise<number> {
     if (!roleCodes.length) return 1
     const rows = await prisma.roleConfig.findMany({ where: { roleCode: { in: roleCodes } } })
     if (!rows.length) return 1
-    return Math.min(...rows.map((r) => r.rate))
+    const rates = rows.map((r) => r.rate).filter((rate) => Number.isFinite(rate) && rate > 0)
+    return rates.length ? Math.min(...rates) : 1
   }
 
   /** 检查用户是否拥有某权限（任一角色具备即可） */
@@ -83,7 +85,7 @@ export class RoleConfigService {
     if (!roleCodes.length) return false
     const rows = await prisma.roleConfig.findMany({ where: { roleCode: { in: roleCodes } } })
     return rows.some((r) => {
-      const p = (r.permissions as RolePermission) ?? {}
+      const p = (r.permissions as RolePermission) ?? DEFAULT_PERMISSIONS[r.roleCode] ?? {}
       return p[permission] === true
     })
   }

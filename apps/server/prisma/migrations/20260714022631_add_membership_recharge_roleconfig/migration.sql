@@ -67,9 +67,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS "role_configs_role_code_key" ON "role_configs"
 
 -- 角色倍率与权限包（服务端强制生效）
 INSERT INTO "role_configs" ("id","role_code","rate","permissions","updated_at") VALUES
-  ('rc_guest','guest',1,'{"canGenerate":true,"canCompose":true,"canAccessAdmin":false,"canRecharge":false,"canManageUsers":false}',now()),
-  ('rc_user','user',1,'{"canGenerate":true,"canCompose":true,"canAccessAdmin":false,"canRecharge":true,"canManageUsers":false}',now()),
-  ('rc_agent','agent',0.7,'{"canGenerate":true,"canCompose":true,"canAccessAdmin":false,"canRecharge":true,"canManageUsers":false}',now()),
+  ('rc_guest','guest',1,'{"canGenerate":false,"canCompose":false,"canAccessAdmin":false,"canRecharge":false,"canManageUsers":false,"canExport":false}',now()),
+  ('rc_user','user',1,'{"canGenerate":true,"canCompose":true,"canAccessAdmin":false,"canRecharge":false,"canManageUsers":false}',now()),
+  ('rc_agent','agent',0.7,'{"canGenerate":true,"canCompose":true,"canAccessAdmin":false,"canRecharge":false,"canManageUsers":false}',now()),
   ('rc_admin','admin',1,'{"canGenerate":true,"canCompose":true,"canAccessAdmin":true,"canRecharge":true,"canManageUsers":true}',now())
 ON CONFLICT ("role_code") DO NOTHING;
 
