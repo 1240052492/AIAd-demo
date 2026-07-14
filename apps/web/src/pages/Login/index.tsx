@@ -31,7 +31,10 @@ export default function LoginPage() {
       const { token, user } = res.data
       setAuth(user, token)
       toast.success(`欢迎回来，${user.nickname || user.phone || user.email}`)
-      navigate('/')
+      const isAdmin =
+        user?.role === 'admin' ||
+        !!user?.roles?.some((r: any) => (r?.role?.code ?? r) === 'admin')
+      navigate(isAdmin ? '/admin' : '/')
     } catch (err) {
       toast.error(err instanceof Error ? err.message : '登录失败，请检查账号或密码')
     } finally {

@@ -15,7 +15,7 @@ function Field({ icon, label, value }: { icon: React.ReactNode; label: string; v
   )
 }
 
-export function Profile() {
+export function Profile({ compact = false }: { compact?: boolean }) {
   const user = useAuthStore((s) => s.user)
   const { accountType, setAccountType } = useAccountSwitch()
 
@@ -25,9 +25,9 @@ export function Profile() {
   ]
 
   return (
-    <div className="space-y-5">
+    <div className={cn('space-y-5', compact && 'space-y-4')}>
       {/* 账户类型切换（纯前端占位） */}
-      <section className="panel-card p-5">
+      <section className={cn('panel-card p-5', compact && 'p-4')}>
         <header className="mb-4 flex items-center gap-2">
           <UserIcon size={16} className="text-blue" />
           <h2 className="text-sm font-semibold text-text">账户类型</h2>
@@ -59,7 +59,7 @@ export function Profile() {
       </section>
 
       {/* 个人资料 */}
-      <section className="panel-card p-5">
+      <section className={cn('panel-card p-5', compact && 'p-4')}>
         <header className="mb-4 flex items-center gap-2">
           <IdCard size={16} className="text-blue" />
           <h2 className="text-sm font-semibold text-text">个人资料</h2>

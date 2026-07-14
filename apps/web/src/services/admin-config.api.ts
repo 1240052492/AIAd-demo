@@ -101,6 +101,26 @@ export interface AdminUserRow {
   createdAt: string
 }
 
+/** 管理员创建用户入参 */
+export interface CreateUserInput {
+  phone?: string
+  email?: string
+  nickname?: string
+  password: string
+  roleCode?: RoleCode
+  initialCredits?: number
+}
+
+/** 管理员编辑用户入参（全部可选，仅传需要改的字段） */
+export interface UpdateUserInput {
+  phone?: string
+  email?: string
+  nickname?: string
+  /** 留空则不改密码 */
+  password?: string
+  status?: 'active' | 'disabled' | 'banned'
+}
+
 // ============================================
 // 其他后台面板类型与接口（真实数据联动）
 // ============================================
@@ -216,6 +236,14 @@ export const adminConfigApi = {
         (params as Record<string, string>) ?? {},
       ).toString()}`,
     ),
+  /** 创建用户（管理员） */
+  createUser: (data: CreateUserInput) =>
+    adminRequest<AdminUserRow>('POST', '/admin/users', data),
+  /** 编辑用户基础信息 / 密码 / 状态 */
+  updateUser: (id: string, data: UpdateUserInput) =>
+    adminRequest<AdminUserRow>('PATCH', `/admin/users/${id}`, data),
+  /** 删除用户（级联清理） */
+  deleteUser: (id: string) => adminRequest<{ id: string }>('DELETE', `/admin/users/${id}`),
   /** 设置用户角色 —— 实际会让权限生效（重新登录后生效） */
   setUserRoles: (id: string, roleCodes: string[]) =>
     adminRequest<unknown>('PUT', `/admin/users/${id}/roles`, { roleCodes }),

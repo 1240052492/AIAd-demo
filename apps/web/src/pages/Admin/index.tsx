@@ -12,6 +12,7 @@ import {
   LayoutGrid,
   ShieldAlert,
   ArrowLeft,
+  ArrowRight,
 } from 'lucide-react'
 import { cn } from '@/utils/cn'
 import { Overview } from './Overview'
@@ -105,6 +106,11 @@ export default function AdminPage() {
             <p className="text-[11px] text-muted">管理控制台</p>
           </div>
         </div>
+        <div className="px-3 pb-1">
+          <button onClick={() => navigate('/')} className="btn-primary w-full !h-9 text-xs">
+            <ArrowRight size={14} /> 去工作台
+          </button>
+        </div>
         <nav className="flex-1 space-y-1 p-3">
           {NAV.map((item) => (
             <button
@@ -124,7 +130,7 @@ export default function AdminPage() {
         </nav>
         <div className="border-t border-border p-3">
           <button onClick={() => navigate('/')} className="btn-secondary w-full !h-8 text-xs">
-            <ArrowLeft size={14} /> 返回工作台
+            <ArrowLeft size={14} /> 去工作台
           </button>
         </div>
       </aside>

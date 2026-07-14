@@ -1,3 +1,4 @@
+import bcrypt from 'bcryptjs'
 import { prisma, imageQueue, compositionQueue } from '../config'
 import { NotFoundError, ValidationError, InsufficientBalanceError } from '../utils/errors'
 import { PaginatedResponse } from '../types/common'
@@ -102,6 +103,144 @@ export class AdminService {
       updatedAt: u.updatedAt,
     }))
     return toPaginated(items, total, page, pageSize)
+  }
+
+  /** 创建用户（管理员）：唯一性校验 + bcrypt + 事务建 user/role/creditAccount/流水 */
+  async createUser(params: {
+    phone?: string | null
+    email?: string | null
+    nickname?: string | null
+    password: string
+    roleCode?: string
+    initialCredits?: number
+  }): Promise<UserWithCredit> {
+    const phone = params.phone?.trim() || null
+    const email = params.email?.trim() || null
+    const nickname = params.nickname?.trim() || null
+    const password = params.password
+    const roleCode = params.roleCode || 'user'
+    const initialCredits = Number.isFinite(params.initialCredits) ? Number(params.initialCredits) : 0
+
+    if (!phone && !email) throw new ValidationError('手机号或邮箱至少填写一个')
+    if (!password || password.length < 6) throw new ValidationError('密码至少 6 位')
+    if (initialCredits < 0) throw new ValidationError('初始积分不能为负')
+
+    // 唯一性校验
+    if (phone) {
+      const exists = await prisma.user.findUnique({ where: { phone } })
+      if (exists) throw new ValidationError('该手机号已被注册')
+    }
+    if (email) {
+      const exists = await prisma.user.findUnique({ where: { email } })
+      if (exists) throw new ValidationError('该邮箱已被注册')
+    }
+
+    const role = await prisma.role.findUnique({ where: { code: roleCode } })
+    if (!role) throw new ValidationError('非法的角色编码')
+
+    const passwordHash = await bcrypt.hash(password, 10)
+
+    const created = await prisma.$transaction(async (tx) => {
+      const user = await tx.user.create({ data: { phone, email, nickname, passwordHash } })
+      await tx.userRole.create({ data: { userId: user.id, roleId: role.id } })
+      const account = await tx.creditAccount.create({
+        data: { userId: user.id, balance: initialCredits },
+      })
+      if (initialCredits > 0) {
+        await tx.creditTransaction.create({
+          data: {
+            userId: user.id,
+            accountId: account.id,
+            type: 'admin_adjust',
+            amount: initialCredits,
+            balanceAfter: account.balance,
+            reason: '管理员创建用户初始积分',
+          },
+        })
+      }
+      return user
+    })
+
+    return {
+      id: created.id,
+      phone: created.phone,
+      email: created.email,
+      nickname: created.nickname,
+      status: created.status,
+      creditBalance: initialCredits,
+      roleCodes: [roleCode],
+      createdAt: created.createdAt,
+      updatedAt: created.updatedAt,
+    }
+  }
+
+  /** 编辑用户基础信息（可选改密码 / 状态），唯一性校验排除自身 */
+  async updateUser(
+    id: string,
+    params: {
+      phone?: string | null
+      email?: string | null
+      nickname?: string | null
+      password?: string
+      status?: string
+    },
+  ) {
+    const existing = await prisma.user.findUnique({ where: { id } })
+    if (!existing) throw new NotFoundError('用户不存在')
+
+    const data: Record<string, unknown> = {}
+
+    if (params.phone !== undefined) {
+      const phone = params.phone?.trim() || null
+      if (phone && phone !== existing.phone) {
+        const dup = await prisma.user.findFirst({ where: { phone, id: { not: id } } })
+        if (dup) throw new ValidationError('该手机号已被其他用户使用')
+      }
+      data.phone = phone
+    }
+    if (params.email !== undefined) {
+      const email = params.email?.trim() || null
+      if (email && email !== existing.email) {
+        const dup = await prisma.user.findFirst({ where: { email, id: { not: id } } })
+        if (dup) throw new ValidationError('该邮箱已被其他用户使用')
+      }
+      data.email = email
+    }
+    if (params.nickname !== undefined) data.nickname = params.nickname?.trim() || null
+    if (params.status !== undefined) {
+      if (!['active', 'disabled', 'banned'].includes(params.status)) {
+        throw new ValidationError('非法的用户状态')
+      }
+      data.status = params.status
+    }
+    if (params.password) {
+      if (params.password.length < 6) throw new ValidationError('密码至少 6 位')
+      data.passwordHash = await bcrypt.hash(params.password, 10)
+    }
+
+    if ((data.phone ?? existing.phone) === null && (data.email ?? existing.email) === null) {
+      throw new ValidationError('手机号或邮箱至少保留一个')
+    }
+
+    const updated = await prisma.user.update({ where: { id }, data })
+    return {
+      id: updated.id,
+      phone: updated.phone,
+      email: updated.email,
+      nickname: updated.nickname,
+      status: updated.status,
+    }
+  }
+
+  /** 删除用户（级联清理关联，靠 schema onDelete: Cascade；UserMembership 无 FK 手动清） */
+  async deleteUser(id: string) {
+    const existing = await prisma.user.findUnique({ where: { id } })
+    if (!existing) throw new NotFoundError('用户不存在')
+    await prisma.$transaction([
+      prisma.userMembership.deleteMany({ where: { userId: id } }),
+      prisma.user.delete({ where: { id } }),
+    ])
+    return { id }
   }
 
   /** 用户详情 */

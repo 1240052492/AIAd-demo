@@ -96,6 +96,55 @@ router.get(
   }),
 )
 
+// POST /api/admin/users  —— 管理员创建用户
+router.post(
+  '/users',
+  asyncHandler(async (req: AuthRequest, res: Response) => {
+    const { phone, email, nickname, password, roleCode, initialCredits } = req.body ?? {}
+    const user = await adminService.createUser({
+      phone,
+      email,
+      nickname,
+      password,
+      roleCode,
+      initialCredits: initialCredits === undefined ? undefined : Number(initialCredits),
+    })
+    sendSuccess(res, user, '用户创建成功')
+  }),
+)
+
+// PATCH /api/admin/users/:id  —— 编辑用户基础信息 / 密码 / 状态
+router.patch(
+  '/users/:id',
+  asyncHandler(async (req: AuthRequest, res: Response) => {
+    // 自我保护：禁止管理员通过此接口修改自身状态导致锁死（其它字段仍可）
+    if (req.params.id === req.user!.id && req.body?.status && req.body.status !== 'active') {
+      throw new ValidationError('不能禁用 / 封禁自己的账号')
+    }
+    const { phone, email, nickname, password, status } = req.body ?? {}
+    const user = await adminService.updateUser(req.params.id, {
+      phone,
+      email,
+      nickname,
+      password,
+      status,
+    })
+    sendSuccess(res, user, '用户信息已更新')
+  }),
+)
+
+// DELETE /api/admin/users/:id  —— 删除用户（禁删自己）
+router.delete(
+  '/users/:id',
+  asyncHandler(async (req: AuthRequest, res: Response) => {
+    if (req.params.id === req.user!.id) {
+      throw new ValidationError('不能删除自己的账号')
+    }
+    const result = await adminService.deleteUser(req.params.id)
+    sendSuccess(res, result, '用户已删除')
+  }),
+)
+
 // PATCH /api/admin/users/:id/status
 router.patch(
   '/users/:id/status',
@@ -251,6 +300,7 @@ router.put(
     }
     const { roleCodes } = req.body ?? {}
     if (!Array.isArray(roleCodes)) throw new ValidationError('roleCodes 必须为数组')
+    if (roleCodes.length > 1) throw new ValidationError('每个用户仅允许分配一个角色')
     const valid = await prisma.role.findMany({ where: { code: { in: roleCodes } } })
     if (valid.length !== roleCodes.length) throw new ValidationError('存在非法的角色编码')
     await prisma.userRole.deleteMany({ where: { userId: req.params.id } })

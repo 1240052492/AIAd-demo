@@ -13,9 +13,6 @@ import { TemplateLibrary } from '@/components/projects/TemplateLibrary'
 import LoginPage from '@/pages/Login'
 import RegisterPage from '@/pages/Register'
 // === AGENT_F1_ROUTES ===
-import MembershipPage from '@/pages/Membership'
-import { PointsDetail } from '@/pages/Membership/PointsDetail'
-import { Profile } from '@/pages/Membership/Profile'
 import { useAuthStore } from '@/stores'
 
 /** 受保护路由：restoreSession 完成后，若仍未登录则跳转登录页。
@@ -78,16 +75,7 @@ export default function App() {
         <Route path="/editor" element={<Protected><EditorPage /></Protected>} />
         <Route path="/editor/:projectId" element={<Protected><EditorPage /></Protected>} />
         <Route path="/admin/*" element={<AdminOnly><AdminPage /></AdminOnly>} />
-        {/* === AGENT_F1_ROUTES === 会员 / 积分 / 个人中心 */}
-        <Route path="/membership" element={<Protected><MembershipPage /></Protected>} />
-        <Route
-          path="/credits"
-          element={<Protected><div className="mx-auto max-w-[1200px] px-6 py-6"><PointsDetail /></div></Protected>}
-        />
-        <Route
-          path="/profile"
-          element={<Protected><div className="mx-auto max-w-[1200px] px-6 py-6"><Profile /></div></Protected>}
-        />
+        {/* === AGENT_F1_ROUTES === 会员/积分/个人中心 已改为顶栏弹框，见 MainLayout */}
         {/* === AGENT_F3_ROUTES === */}
         <Route path="/dashboard" element={<AdminOnly><DashboardPage /></AdminOnly>} />
         {/* === AGENT_F3_ROUTES === */}

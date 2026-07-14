@@ -6,27 +6,18 @@ import {
   Sparkles,
   Check,
   Loader2,
-  Receipt,
   Gift,
-  UserRound,
   Zap,
   ShieldCheck,
 } from 'lucide-react'
-import { toast, Toaster } from 'sonner'
+import { toast } from 'sonner'
 import { cn } from '@/utils/cn'
 import { membershipApi, type MembershipPlan } from '@/services/membership.api'
 import { useCreditStore } from '@/stores'
-import { formatYuan, formatPoints, PointsDetail } from './PointsDetail'
-import { Profile } from './Profile'
+import { formatYuan, formatPoints } from './PointsDetail'
+import { Dialog } from '@/components/ui/Dialog'
 
-type TabKey = 'center' | 'mall' | 'detail' | 'profile'
-
-const TABS: { key: TabKey; label: string; icon: React.ReactNode }[] = [
-  { key: 'center', label: '会员中心', icon: <Crown size={16} /> },
-  { key: 'mall', label: '积分超市', icon: <Gift size={16} /> },
-  { key: 'detail', label: '积分明细', icon: <Receipt size={16} /> },
-  { key: 'profile', label: '个人中心', icon: <UserRound size={16} /> },
-]
+type TabKey = 'plans' | 'recharge'
 
 function PlanCard({
   plan,
@@ -39,7 +30,7 @@ function PlanCard({
 }) {
   const isCredits = /credit|point|积分/i.test(plan.code + plan.name)
   return (
-    <div className="panel-card flex flex-col gap-3 p-5 transition-all hover:border-blue/40">
+    <div className="panel-card flex flex-col gap-3 p-4 transition-all hover:border-blue/40">
       <div className="flex items-start justify-between">
         <div className="flex h-10 w-10 items-center justify-center rounded-card bg-gradient-to-br from-blue to-[#7cc7ff] text-[#07121d]">
           {isCredits ? <Coins size={18} /> : <Crown size={18} />}
@@ -80,8 +71,8 @@ function PlanCard({
   )
 }
 
-export default function MembershipPage() {
-  const [tab, setTab] = useState<TabKey>('center')
+export function MembershipModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const [tab, setTab] = useState<TabKey>('plans')
   const [rechargeAmount, setRechargeAmount] = useState<number>(2900)
   const queryClient = useQueryClient()
   const setBalance = useCreditStore((s) => s.setBalance)
@@ -89,11 +80,13 @@ export default function MembershipPage() {
   const plansQ = useQuery({
     queryKey: ['membership', 'plans'],
     queryFn: async () => (await membershipApi.getPlans()).data,
+    enabled: open,
   })
 
   const mineQ = useQuery({
     queryKey: ['membership', 'mine'],
     queryFn: async () => (await membershipApi.getMine()).data,
+    enabled: open,
   })
 
   const refreshBalance = async () => {
@@ -139,162 +132,155 @@ export default function MembershipPage() {
   const memberPlans = allPlans.filter((p) => !/credit|point|积分/i.test(p.code + p.name))
 
   return (
-    <div className="space-y-5">
-      <div>
-        <h1 className="text-xl font-bold text-text">会员与积分</h1>
-        <p className="mt-1 text-sm text-muted">管理你的会员权益、积分余额与消费明细</p>
-      </div>
-
-      {/* 顶部状态条 */}
-      <section
-        className={cn(
-          'panel-card flex flex-col gap-3 p-5 sm:flex-row sm:items-center sm:justify-between',
-          current ? 'border-blue/40' : 'border-amber/40',
-        )}
-      >
-        <div className="flex items-center gap-3">
-          <div
-            className={cn(
-              'flex h-11 w-11 items-center justify-center rounded-card',
-              current
-                ? 'bg-gradient-to-br from-blue to-[#7cc7ff] text-[#07121d]'
-                : 'bg-amber/15 text-amber',
-            )}
-          >
-            {current ? <Crown size={20} /> : <Zap size={20} />}
+    <Dialog
+      open={open}
+      onOpenChange={(o) => !o && onClose()}
+      title="会员中心"
+      description="管理会员权益与积分余额"
+      className="max-w-2xl"
+    >
+      <div className="space-y-4">
+        {/* 状态条 */}
+        <section
+          className={cn(
+            'panel-card flex items-center justify-between gap-3 p-4',
+            current ? 'border-blue/40' : 'border-amber/40',
+          )}
+        >
+          <div className="flex items-center gap-3">
+            <div
+              className={cn(
+                'flex h-10 w-10 items-center justify-center rounded-card',
+                current ? 'bg-gradient-to-br from-blue to-[#7cc7ff] text-[#07121d]' : 'bg-amber/15 text-amber',
+              )}
+            >
+              {current ? <Crown size={18} /> : <Zap size={18} />}
+            </div>
+            <div>
+              {current ? (
+                <>
+                  <p className="text-sm font-semibold text-text">当前会员：{current.plan.name}</p>
+                  <p className="text-xs text-muted">
+                    有效期至 {new Date(current.expiresAt).toLocaleDateString('zh-CN')} · 已赠{' '}
+                    {formatPoints(current.pointsGranted)} 积分
+                  </p>
+                </>
+              ) : (
+                <>
+                  <p className="text-sm font-semibold text-text">未开通会员</p>
+                  <p className="text-xs text-muted">本期暂不开放在线支付，请联系管理员开通</p>
+                </>
+              )}
+            </div>
           </div>
-          <div>
-            {current ? (
-              <>
-                <p className="text-sm font-semibold text-text">
-                  当前会员：{current.plan.name}
-                </p>
-                <p className="text-xs text-muted">
-                  有效期至 {new Date(current.expiresAt).toLocaleDateString('zh-CN')} · 已赠{' '}
-                  {formatPoints(current.pointsGranted)} 积分
-                </p>
-              </>
-            ) : (
-              <>
-                <p className="text-sm font-semibold text-text">未开通会员</p>
-                <p className="text-xs text-muted">本期暂不开放在线支付，请联系管理员开通会员或调整积分</p>
-              </>
-            )}
+          <div className="flex items-center gap-2 text-sm text-muted">
+            <ShieldCheck size={15} />
+            {current ? '权益生效中' : '支付待开通'}
           </div>
-        </div>
-        <div className="flex items-center gap-2 text-sm text-muted">
-          <ShieldCheck size={15} />
-          {current ? '会员权益生效中' : '在线支付待开通'}
-        </div>
-      </section>
+        </section>
 
-      {/* Tab 切换 */}
-      <div className="flex flex-wrap gap-1 border-b border-border">
-        {TABS.map((t) => (
+        {/* 内部 tab */}
+        <div className="flex gap-1 border-b border-border">
           <button
-            key={t.key}
-            onClick={() => setTab(t.key)}
+            onClick={() => setTab('plans')}
             className={cn(
-              'flex items-center gap-1.5 border-b-2 px-3 py-2.5 text-sm transition-colors',
-              tab === t.key
-                ? 'border-blue text-text'
-                : 'border-transparent text-muted hover:text-text',
+              'flex items-center gap-1.5 border-b-2 px-3 py-2 text-sm transition-colors',
+              tab === 'plans' ? 'border-blue text-text' : 'border-transparent text-muted hover:text-text',
             )}
           >
-            {t.icon}
-            {t.label}
+            <Crown size={15} />
+            会员套餐
           </button>
-        ))}
-      </div>
-
-      {/* 会员中心 */}
-      {tab === 'center' && (
-        <div className="space-y-4">
-          {plansQ.isLoading ? (
-            <div className="flex justify-center py-10">
-              <Loader2 className="h-6 w-6 animate-spin text-muted" />
-            </div>
-          ) : (
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {(memberPlans.length ? memberPlans : allPlans).map((plan) => (
-                <PlanCard
-                  key={plan.id}
-                  plan={plan}
-                  purchasing={purchaseMut.isPending && purchaseMut.variables?.code === plan.code}
-                  onPurchase={(p) => purchaseMut.mutate(p)}
-                />
-              ))}
-            </div>
-          )}
+          <button
+            onClick={() => setTab('recharge')}
+            className={cn(
+              'flex items-center gap-1.5 border-b-2 px-3 py-2 text-sm transition-colors',
+              tab === 'recharge' ? 'border-blue text-text' : 'border-transparent text-muted hover:text-text',
+            )}
+          >
+            <Gift size={15} />
+            积分充值
+          </button>
         </div>
-      )}
 
-      {/* 积分超市 */}
-      {tab === 'mall' && (
-        <div className="space-y-4">
-          {creditPlans.length > 0 && (
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {creditPlans.map((plan) => (
-                <PlanCard
-                  key={plan.id}
-                  plan={plan}
-                  purchasing={purchaseMut.isPending && purchaseMut.variables?.code === plan.code}
-                  onPurchase={(p) => purchaseMut.mutate(p)}
+        {/* 会员套餐 */}
+        {tab === 'plans' && (
+          <div className="space-y-3">
+            {plansQ.isLoading ? (
+              <div className="flex justify-center py-8">
+                <Loader2 className="h-6 w-6 animate-spin text-muted" />
+              </div>
+            ) : (
+              <div className="grid gap-3 sm:grid-cols-2">
+                {(memberPlans.length ? memberPlans : allPlans).map((plan) => (
+                  <PlanCard
+                    key={plan.id}
+                    plan={plan}
+                    purchasing={purchaseMut.isPending && purchaseMut.variables?.code === plan.code}
+                    onPurchase={(p) => purchaseMut.mutate(p)}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* 积分充值 */}
+        {tab === 'recharge' && (
+          <div className="space-y-3">
+            {creditPlans.length > 0 && (
+              <div className="grid gap-3 sm:grid-cols-2">
+                {creditPlans.map((plan) => (
+                  <PlanCard
+                    key={plan.id}
+                    plan={plan}
+                    purchasing={purchaseMut.isPending && purchaseMut.variables?.code === plan.code}
+                    onPurchase={(p) => purchaseMut.mutate(p)}
+                  />
+                ))}
+              </div>
+            )}
+
+            <section className="panel-card p-4">
+              <header className="mb-3 flex items-center gap-2">
+                <Coins size={16} className="text-amber" />
+                <h2 className="text-sm font-semibold text-text">积分充值</h2>
+              </header>
+              <div className="flex flex-wrap items-center gap-3">
+                {[2900, 9900, 29900].map((amt) => (
+                  <button
+                    key={amt}
+                    onClick={() => setRechargeAmount(amt)}
+                    className={cn(
+                      'rounded-pill px-4 py-1.5 text-sm transition-all',
+                      rechargeAmount === amt ? 'bg-amber text-[#221400]' : 'bg-panel/60 text-muted hover:text-text',
+                    )}
+                  >
+                    {formatYuan(amt)}
+                  </button>
+                ))}
+                <input
+                  type="number"
+                  min={100}
+                  step={100}
+                  value={rechargeAmount}
+                  onChange={(e) => setRechargeAmount(Math.max(0, Number(e.target.value)))}
+                  className="h-9 w-32 rounded-btn border border-border bg-panel px-3 text-sm text-text outline-none focus:border-blue/60"
                 />
-              ))}
-            </div>
-          )}
-
-          {/* 在线支付未开通：禁止客户端自助模拟到账 */}
-          <section className="panel-card p-5">
-            <header className="mb-3 flex items-center gap-2">
-              <Coins size={16} className="text-amber" />
-              <h2 className="text-sm font-semibold text-text">积分充值</h2>
-            </header>
-            <div className="flex flex-wrap items-center gap-3">
-              {[2900, 9900, 29900].map((amt) => (
                 <button
-                  key={amt}
-                  onClick={() => setRechargeAmount(amt)}
-                  className={cn(
-                    'rounded-pill px-4 py-1.5 text-sm transition-all',
-                    rechargeAmount === amt
-                      ? 'bg-amber text-[#221400]'
-                      : 'bg-panel/60 text-muted hover:text-text',
-                  )}
+                  disabled
+                  onClick={() => undefined}
+                  className="btn-primary flex items-center gap-2 opacity-60"
                 >
-                  {formatYuan(amt)}
+                  {rechargeMut.isPending ? <Loader2 size={15} className="animate-spin" /> : <Coins size={15} />}
+                  联系管理员充值
                 </button>
-              ))}
-              <input
-                type="number"
-                min={100}
-                step={100}
-                value={rechargeAmount}
-                onChange={(e) => setRechargeAmount(Math.max(0, Number(e.target.value)))}
-                className="h-9 w-32 rounded-btn border border-border bg-panel px-3 text-sm text-text outline-none focus:border-blue/60"
-              />
-              <button
-                disabled
-                onClick={() => undefined}
-                className="btn-primary flex items-center gap-2 opacity-60"
-              >
-                {rechargeMut.isPending ? <Loader2 size={15} className="animate-spin" /> : <Coins size={15} />}
-                联系管理员充值
-              </button>
-            </div>
-            <p className="mt-2 text-xs text-muted">在线支付尚未开通，本期由后台管理员手动调整积分。</p>
-          </section>
-        </div>
-      )}
-
-      {/* 积分明细 */}
-      {tab === 'detail' && <PointsDetail />}
-
-      {/* 个人中心 */}
-      {tab === 'profile' && <Profile />}
-
-      <Toaster position="top-center" richColors />
-    </div>
+              </div>
+              <p className="mt-2 text-xs text-muted">在线支付尚未开通，本期由后台管理员手动调整积分。</p>
+            </section>
+          </div>
+        )}
+      </div>
+    </Dialog>
   )
 }

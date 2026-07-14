@@ -1,4 +1,6 @@
+import { useState } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
+import { Toaster } from 'sonner'
 import {
   Home,
   FolderKanban,
@@ -8,10 +10,15 @@ import {
   Crown,
   Gift,
   LogOut,
+  Settings,
 } from 'lucide-react'
 import { cn } from '@/utils/cn'
 import { useAuthStore } from '@/stores'
 import { useCreditStore } from '@/stores'
+import { Dialog } from '@/components/ui/Dialog'
+import { MembershipModal } from '@/pages/Membership'
+import { PointsDetail } from '@/pages/Membership/PointsDetail'
+import { Profile } from '@/pages/Membership/Profile'
 
 /** 顶部导航项 */
 const TOP_NAV = [
@@ -65,6 +72,8 @@ export default function MainLayout() {
   const logout = useAuthStore((s) => s.logout)
   const balance = useCreditStore((s) => s.balance)
   const isAdmin = getRoleCodes(user).includes('admin')
+  const isAdminRoute = location.pathname.startsWith('/admin')
+  const [modal, setModal] = useState<null | 'membership' | 'credits' | 'profile'>(null)
 
   // 判断 Rail 是否高亮：根据当前路径前缀匹配
   const isRailActive = (to: string) =>
@@ -72,7 +81,8 @@ export default function MainLayout() {
 
   return (
     <div className="flex h-screen w-full overflow-hidden bg-bg text-text">
-      {/* 左侧 Rail */}
+      {/* 左侧 Rail（后台路由下隐藏用户端导航） */}
+      {!isAdminRoute && (
       <aside className="flex w-[82px] shrink-0 flex-col items-center border-r border-border bg-panel/60 py-4">
         <NavLink to="/" className="mb-6" aria-label="首页">
           <LogoMark />
@@ -103,6 +113,7 @@ export default function MainLayout() {
           })}
         </nav>
       </aside>
+      )}
 
       {/* 主区域 */}
       <div className="flex min-w-0 flex-1 flex-col">
@@ -138,20 +149,32 @@ export default function MainLayout() {
 
           {/* 右：会员 / 积分 / 头像 */}
           <div className="flex items-center gap-2">
-            <NavLink
-              to="/membership"
+            {isAdmin && !isAdminRoute && (
+              <button
+                type="button"
+                onClick={() => navigate('/admin')}
+                className="hidden items-center gap-1.5 rounded-pill bg-blue/15 px-3 py-1.5 text-sm font-medium text-blue transition-all hover:bg-blue/25 lg:inline-flex"
+              >
+                <Settings className="h-4 w-4" />
+                系统管理
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => setModal('membership')}
               className="hidden items-center gap-1.5 rounded-pill px-3 py-1.5 text-sm text-muted transition-all hover:bg-white/5 hover:text-text lg:inline-flex"
             >
               <Crown className="h-4 w-4 text-amber" />
               会员中心
-            </NavLink>
-            <NavLink
-              to="/credits"
+            </button>
+            <button
+              type="button"
+              onClick={() => setModal('credits')}
               className="hidden items-center gap-1.5 rounded-pill px-3 py-1.5 text-sm text-muted transition-all hover:bg-white/5 hover:text-text lg:inline-flex"
             >
               <Gift className="h-4 w-4 text-amber" />
-              积分超市
-            </NavLink>
+              积分总览
+            </button>
 
             <div className="credit-badge font-semibold">
               <span className="text-amber">积分</span>
@@ -159,7 +182,14 @@ export default function MainLayout() {
             </div>
 
             <div className="ml-1 flex items-center gap-2">
-              <Avatar name={user?.nickname || user?.phone || user?.email} />
+              <button
+                type="button"
+                onClick={() => setModal('profile')}
+                title="个人中心"
+                className="rounded-full transition-all hover:ring-2 hover:ring-blue/50"
+              >
+                <Avatar name={user?.nickname || user?.phone || user?.email} />
+              </button>
               {token && (
                 <button
                   type="button"
@@ -182,6 +212,28 @@ export default function MainLayout() {
           <Outlet />
         </main>
       </div>
+
+      {/* 弹框：会员中心 / 积分总览 / 个人中心 */}
+      <MembershipModal open={modal === 'membership'} onClose={() => setModal(null)} />
+      <Dialog
+        open={modal === 'credits'}
+        onOpenChange={(o) => !o && setModal(null)}
+        title="积分总览"
+        description="积分余额、消费与流水概览"
+        className="max-w-2xl"
+      >
+        <PointsDetail compact />
+      </Dialog>
+      <Dialog
+        open={modal === 'profile'}
+        onOpenChange={(o) => !o && setModal(null)}
+        title="个人中心"
+        className="max-w-md"
+      >
+        <Profile compact />
+      </Dialog>
+
+      <Toaster richColors position="top-center" />
     </div>
   )
 }

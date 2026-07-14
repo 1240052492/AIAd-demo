@@ -49,7 +49,7 @@ const TX_TYPE_LABEL: Record<string, string> = {
   recharge: '充值',
 }
 
-export function PointsDetail() {
+export function PointsDetail({ compact = false }: { compact?: boolean }) {
   const setBalance = useCreditStore((s) => s.setBalance)
 
   const balanceQ = useQuery({
@@ -93,9 +93,9 @@ export function PointsDetail() {
     : []
 
   return (
-    <div className="space-y-5">
+    <div className={cn('space-y-5', compact && 'space-y-4')}>
       {/* 余额卡片 */}
-      <section className="panel-card flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
+      <section className={cn('panel-card flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between', compact && 'p-4')}>
         <div className="flex items-center gap-4">
           <div className="flex h-12 w-12 items-center justify-center rounded-card bg-gradient-to-br from-amber to-orange-400 text-[#221400]">
             <Coins size={22} />
@@ -122,7 +122,7 @@ export function PointsDetail() {
       </section>
 
       {/* 消费概览（CSS 柱状图） */}
-      <section className="panel-card p-5">
+      <section className={cn('panel-card p-5', compact && 'p-4')}>
         <header className="mb-4 flex items-center gap-2">
           <TrendingDown size={16} className="text-amber" />
           <h2 className="text-sm font-semibold text-text">消费概览</h2>

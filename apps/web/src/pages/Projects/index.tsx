@@ -1,4 +1,5 @@
 import { useParams, useNavigate, Link } from 'react-router-dom'
+import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import {
   Plus,
@@ -15,6 +16,7 @@ import { projectApi, creditApi } from '@/services/api'
 import { BUSINESS_TYPES, type Project, type CreditTransaction, type GenerationJob } from '@/types'
 import { cn } from '@/utils/cn'
 import { Tag, type TagTone } from '@/components/ui/Tag'
+import { Dialog } from '@/components/ui/Dialog'
 
 const BUSINESS_LABEL: Record<string, string> = Object.fromEntries(
   BUSINESS_TYPES.map((b) => [b.key, b.label]),
@@ -82,6 +84,14 @@ function ProjectCenter() {
   const projects = projRes?.data.items ?? []
   const transactions = creditRes?.data.items ?? []
 
+  const [showAllTx, setShowAllTx] = useState(false)
+  const { data: allTxRes, isLoading: allTxLoading } = useQuery({
+    queryKey: ['credits', 'all-dialog'],
+    queryFn: () => creditApi.transactions({ page: 1, pageSize: 50 }),
+    enabled: showAllTx,
+  })
+  const allTx = allTxRes?.data.items ?? []
+
   return (
     <div className="mx-auto max-w-[1400px] px-6 py-6">
       <div className="mb-5 flex items-end justify-between">
@@ -147,7 +157,7 @@ function ProjectCenter() {
             <h2 className="text-sm font-semibold text-text">积分消耗</h2>
             <button
               className="flex items-center gap-0.5 text-xs text-blue hover:underline"
-              onClick={() => navigate('/admin')}
+              onClick={() => setShowAllTx(true)}
             >
               查看全部 <ArrowRight size={12} />
             </button>
@@ -214,6 +224,50 @@ function ProjectCenter() {
           </div>
         </section>
       </div>
+
+      {/* 本账号积分流水弹框：仅展示当前登录用户的积分消耗与变动，不再跳转后台 */}
+      <Dialog
+        open={showAllTx}
+        onOpenChange={(o) => !o && setShowAllTx(false)}
+        title="我的积分流水"
+        description="仅展示本账号的积分消耗与变动记录"
+        className="max-w-2xl"
+      >
+        <div className="max-h-[60vh] space-y-1 overflow-y-auto">
+          {allTxLoading ? (
+            <p className="py-10 text-center text-sm text-muted">加载中…</p>
+          ) : allTx.length === 0 ? (
+            <p className="py-10 text-center text-sm text-muted">暂无积分流水</p>
+          ) : (
+            allTx.map((t: CreditTransaction) => {
+              const positive = t.amount >= 0
+              return (
+                <div
+                  key={t.id}
+                  className="flex items-center justify-between rounded-pill px-2 py-2.5 transition-colors hover:bg-white/5"
+                >
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold text-text">
+                      {CREDIT_TYPE_LABEL[t.type] ?? t.type}
+                    </p>
+                    <p className="mt-0.5 truncate text-xs text-muted">{t.reason ?? fmtTime(t.createdAt)}</p>
+                  </div>
+                  <span
+                    className={cn(
+                      'shrink-0 rounded-pill border px-2.5 py-1 text-xs font-semibold',
+                      positive
+                        ? 'border-green/45 bg-green/12 text-green'
+                        : 'border-orange-400/45 bg-orange-400/12 text-orange-400',
+                    )}
+                  >
+                    {positive ? `+${t.amount}` : t.amount}
+                  </span>
+                </div>
+              )
+            })
+          )}
+        </div>
+      </Dialog>
     </div>
   )
 }
