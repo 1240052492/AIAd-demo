@@ -122,7 +122,6 @@ router.post('/', requirePermission('canGenerate'), async (req: Request, res: Res
     const mock = req.body?.mock === true
     const creditCost = mock ? 0 : n * imageCreditCost
     // 生成消耗按积分规则标准扣减；代理 0.7 仅用于充值付款金额，不影响消费积分。
-    const creditCost = mock ? 0 : n * imageCreditCost
     const requiredVisibleTexts = normalizeRequiredVisibleTexts(req.body?.requiredVisibleTexts)
 
     if (mock) {

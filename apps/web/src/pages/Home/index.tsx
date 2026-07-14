@@ -28,7 +28,7 @@ import {
   projectApi,
   vectorAssetApi,
 } from '@/services/api'
-import type { Asset, GenerationJob, TextCorrection, TextValidationCheck, TextValidationRecord } from '@/types'
+import type { TextCorrection, TextValidationCheck, TextValidationRecord } from '@/types'
 import {
   BUSINESS_TYPES,
   DEFAULT_MATERIAL,
@@ -43,19 +43,18 @@ import {
 } from './workbench.constants'
 import { homeImageJobApi } from '@/services/home.api'
 import { appUrl, createVectorSvg, extractStoreName, requestedVisibleTexts } from './workbench.utils'
+import {
+  useGenerationStore,
+  firstAsset,
+  sourceAsset,
+  assetId,
+  textValidation,
+  correctionFromCheck,
+  type ActiveTab,
+  type JobWithResponse,
+} from '@/stores/generation'
 
 type RunMode = 'mock' | 'live'
-type ActiveTab = 'composed' | 'original' | 'vector'
-type JobWithResponse = GenerationJob & {
-  results?: Array<Asset & { assetId?: string }>
-  responseJson?: {
-    textValidation?: TextValidationRecord
-    textCorrections?: TextCorrection[]
-    correctedAssets?: Asset[]
-    assetId?: string
-    url?: string
-  }
-}
 
 function PillToggle<T extends string>({
   options,
@@ -133,57 +132,6 @@ function SelectWithOther({
   )
 }
 
-function firstAsset(job?: JobWithResponse | null): Asset | undefined {
-  const corrected = job?.responseJson?.correctedAssets
-  return (corrected?.length ? corrected[corrected.length - 1] : undefined) || job?.results?.[0]
-}
-
-function sourceAsset(job?: JobWithResponse | null): Asset | undefined {
-  return job?.results?.[0]
-}
-
-function assetId(asset?: Asset & { assetId?: string }): string | undefined {
-  return asset?.id || asset?.assetId
-}
-
-function textValidation(job?: JobWithResponse | null): TextValidationRecord | undefined {
-  return job?.responseJson?.textValidation
-}
-
-function correctionFromCheck(check: TextValidationCheck, validation?: TextValidationRecord): TextCorrection {
-  const region = validation?.regions.find((item) => item.id === check.regionId)
-  if (!region?.polygon?.length) {
-    return {
-      expectedText: check.expectedText,
-      regionId: check.regionId,
-      x: 80,
-      y: 80,
-      width: 460,
-      height: 120,
-      fontSize: 72,
-      textColor: '#111827',
-      coverColor: '#ffffff',
-    }
-  }
-  const xs = region.polygon.map((point) => point.x)
-  const ys = region.polygon.map((point) => point.y)
-  const x = Math.max(0, Math.floor(Math.min(...xs)))
-  const y = Math.max(0, Math.floor(Math.min(...ys)))
-  const width = Math.max(8, Math.ceil(Math.max(...xs) - Math.min(...xs)))
-  const height = Math.max(8, Math.ceil(Math.max(...ys) - Math.min(...ys)))
-  return {
-    expectedText: check.expectedText,
-    regionId: check.regionId,
-    x,
-    y,
-    width,
-    height,
-    fontSize: Math.max(18, Math.round(height * 0.68)),
-    textColor: '#111827',
-    coverColor: '#ffffff',
-  }
-}
-
 export default function HomePage() {
   const navigate = useNavigate()
   const token = useAuthStore((state) => state.token)
@@ -201,23 +149,38 @@ export default function HomePage() {
   const [quality, setQuality] = useState('high')
   const [count] = useState(1)
 
-  const [projectId, setProjectId] = useState<string>()
-  const [promptText, setPromptText] = useState('')
-  const [originalPromptText, setOriginalPromptText] = useState('')
   const [environmentFile, setEnvironmentFile] = useState<File | null>(null)
   const [environmentPreview, setEnvironmentPreview] = useState('')
-  const [environmentAsset, setEnvironmentAsset] = useState<Asset | null>(null)
-  const [originalJob, setOriginalJob] = useState<JobWithResponse | null>(null)
-  const [composedJob, setComposedJob] = useState<JobWithResponse | null>(null)
-  const [vectorAsset, setVectorAsset] = useState<Asset | null>(null)
-  const [activeTab, setActiveTab] = useState<ActiveTab>('original')
-  const [showSourceImage, setShowSourceImage] = useState(false)
-  const [busy, setBusy] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [validating, setValidating] = useState(false)
   const [correcting, setCorrecting] = useState(false)
-  const [correctionDraft, setCorrectionDraft] = useState<TextCorrection | null>(null)
   const [creditRules, setCreditRules] = useState<Record<string, number>>({})
+
+  // 生图进度与结果来自全局 store：切换路由组件卸载重建后依然保留，
+  // 生图轮询在 store action 中执行（脱离组件生命周期），因此「生成中切页再切回」不会中断。
+  const {
+    busy,
+    projectId,
+    promptText,
+    originalPromptText,
+    activeTab,
+    originalJob,
+    composedJob,
+    vectorAsset,
+    environmentAsset,
+    showSourceImage,
+    correctionDraft,
+    setActiveTab,
+    setPromptText,
+    setOriginalPromptText,
+    setShowSourceImage,
+    setCorrectionDraft,
+    setEnvironmentAsset,
+    updateOriginalJob,
+    updateComposedJob,
+    generate,
+    regenerateWithPrompt,
+  } = useGenerationStore()
 
   const visibleTexts = useMemo(
     () => requestedVisibleTexts(customerText, requiredTextInput),
@@ -250,72 +213,6 @@ export default function HomePage() {
     return brief + image + composition + svg
   }, [count, creditRules, environmentAsset, environmentFile])
 
-  async function ensureCreditRules() {
-    if (Object.keys(creditRules).length) return creditRules
-    const rules = await creditApi.rules()
-    setCreditRules(rules.data)
-    return rules.data
-  }
-
-  async function uploadEnvironment(project: string): Promise<Asset | null> {
-    if (environmentAsset) return environmentAsset
-    if (!environmentFile) return null
-    setUploading(true)
-    try {
-      const asset = await projectApi.uploadAsset(project, environmentFile)
-      setEnvironmentAsset(asset.data)
-      return asset.data
-    } finally {
-      setUploading(false)
-    }
-  }
-
-  async function submitOriginal(
-    project: string,
-    prompt: string,
-    mock: boolean,
-    polishPrompt: string,
-  ): Promise<JobWithResponse> {
-    const response = await homeImageJobApi.create({
-      projectId: project,
-      prompt,
-      count,
-      ratio,
-      model,
-      requiredVisibleTexts: visibleTexts,
-      mock,
-      polishPrompt,
-    })
-    const finalJob = await imageJobApi.poll(response.data.jobId, 1600, mock ? 15_000 : 720_000)
-    setOriginalJob(finalJob)
-    return finalJob
-  }
-
-  async function submitComposition(project: string, envAsset: Asset, designAsset: Asset & { assetId?: string }) {
-    const designAssetId = assetId(designAsset)
-    if (!designAssetId) return null
-    const response = await compositionJobApi.create({
-      projectId: project,
-      environmentAssetId: envAsset.id,
-      designAssetId,
-      outputFormat: 'png',
-      requiredVisibleTexts: visibleTexts,
-    })
-    const finalJob = await imageJobApi.poll(response.data.jobId, 1600, 240_000)
-    setComposedJob(finalJob)
-    setActiveTab('composed')
-    return finalJob
-  }
-
-  async function createVector(project: string, job?: JobWithResponse | null) {
-    const response = await vectorAssetApi.create({
-      projectId: project,
-      jobId: job?.id,
-      svg: createVectorSvg(storeName),
-    })
-    setVectorAsset(response.data.asset)
-  }
-
   async function handleGenerate() {
     if (!customerText.trim()) {
       toast.error('请先填写客户需求')
@@ -327,65 +224,20 @@ export default function HomePage() {
       return
     }
 
-    setBusy(true)
-    setOriginalJob(null)
-    setComposedJob(null)
-    setVectorAsset(null)
-    setCorrectionDraft(null)
-    setShowSourceImage(false)
-    setActiveTab(environmentFile || environmentAsset ? 'composed' : 'original')
-
-    try {
-      await ensureCreditRules()
-      const selectedBusiness = BUSINESS_TYPES.find((item) => item.id === businessType)
-      const briefResponse = await aiApi.brief({
-        businessType,
-        clientText: customerText,
-        mock: runMode === 'mock',
-        constraints: {
-          material: materialValue,
-          style: styleValue,
-          ratio,
-          quality,
-          requiredVisibleTexts: visibleTexts.join('\n'),
-        },
-      })
-      const generatedPrompt = briefResponse.data.imagePrompt
-      setOriginalPromptText(generatedPrompt)
-      setPromptText(generatedPrompt)
-
-      const projectResponse = await projectApi.create({
-        title: `${storeName} ${selectedBusiness?.title || '广告'}项目`,
-        businessType,
-        briefJson: {
-          ...briefResponse.data.brief,
-          customerText,
-          material: materialValue,
-          style: styleValue,
-          ratio,
-          quality,
-          requiredVisibleTexts: visibleTexts,
-          imagePrompt: generatedPrompt,
-        },
-      })
-      const nextProjectId = projectResponse.data.id
-      setProjectId(nextProjectId)
-
-      const uploadedEnv = await uploadEnvironment(nextProjectId)
-      const original = await submitOriginal(nextProjectId, generatedPrompt, runMode === 'mock', generatedPrompt)
-      const designAsset = firstAsset(original)
-      if (uploadedEnv && designAsset) {
-        await submitComposition(nextProjectId, uploadedEnv, designAsset)
-      } else {
-        setActiveTab('original')
-      }
-      await createVector(nextProjectId, original)
-      toast.success('工作台方案已生成')
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : '生成失败')
-    } finally {
-      setBusy(false)
-    }
+    await generate({
+      businessType,
+      customerText,
+      materialValue,
+      styleValue,
+      ratio,
+      quality,
+      visibleTexts,
+      count,
+      model,
+      mock: runMode === 'mock',
+      environmentFile,
+      environmentAsset,
+    })
   }
 
   async function handleRegenerateWithPrompt() {
@@ -393,24 +245,13 @@ export default function HomePage() {
       await handleGenerate()
       return
     }
-    setBusy(true)
-    setCorrectionDraft(null)
-    setShowSourceImage(false)
-    try {
-      const original = await submitOriginal(projectId, promptText, runMode === 'mock', promptText)
-      const designAsset = firstAsset(original)
-      if (environmentAsset && designAsset) {
-        await submitComposition(projectId, environmentAsset, designAsset)
-      } else {
-        setActiveTab('original')
-      }
-      await createVector(projectId, original)
-      toast.success('已按当前提示词重新生成')
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : '重新生成失败')
-    } finally {
-      setBusy(false)
-    }
+    await regenerateWithPrompt({
+      projectId,
+      promptText,
+      mock: runMode === 'mock',
+      environmentAsset,
+      visibleTexts,
+    })
   }
 
   /**
@@ -458,8 +299,8 @@ export default function HomePage() {
     try {
       const response = await imageJobApi.validateText(activeJob.id)
       const updated = response.data.job as JobWithResponse
-      if (activeJob.jobType === 'composition') setComposedJob(updated)
-      else setOriginalJob(updated)
+      if (activeJob.jobType === 'composition') updateComposedJob(updated)
+      else updateOriginalJob(updated)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : '文字校验失败')
     } finally {
@@ -473,8 +314,8 @@ export default function HomePage() {
     try {
       const response = await imageJobApi.applyTextCorrections(activeJob.id, [correctionDraft])
       const updated = response.data.job as JobWithResponse
-      if (activeJob.jobType === 'composition') setComposedJob(updated)
-      else setOriginalJob(updated)
+      if (activeJob.jobType === 'composition') updateComposedJob(updated)
+      else updateOriginalJob(updated)
       setShowSourceImage(false)
       setCorrectionDraft(null)
       toast.success('文字校正图已生成')
@@ -805,7 +646,7 @@ export default function HomePage() {
                 </div>
                 <div className="flex gap-2">
                   {activeJob.responseJson?.correctedAssets?.length ? (
-                    <button type="button" onClick={() => setShowSourceImage((value) => !value)} className="btn-secondary h-8 gap-1.5">
+                    <button type="button" onClick={() => setShowSourceImage(!showSourceImage)} className="btn-secondary h-8 gap-1.5">
                       {showSourceImage ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
                       {showSourceImage ? '校正图' : '原图'}
                     </button>
