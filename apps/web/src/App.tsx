@@ -10,6 +10,9 @@ import AdminPage from '@/pages/Admin'
 import DashboardPage from '@/pages/Dashboard'
 // === AGENT_F3_ROUTES ===
 import { TemplateLibrary } from '@/components/projects/TemplateLibrary'
+import PromptLibrary from '@/pages/Prompts'
+import WorkflowLibrary from '@/pages/Workflows'
+import AccountPage from '@/pages/Account'
 import LoginPage from '@/pages/Login'
 import RegisterPage from '@/pages/Register'
 // === AGENT_F1_ROUTES ===
@@ -71,6 +74,9 @@ export default function App() {
         <Route path="/projects" element={<ProjectsPage />} />
         <Route path="/projects/:id" element={<ProjectsPage />} />
         <Route path="/templates" element={<div className="mx-auto max-w-[1200px] px-6 py-6"><TemplateLibrary /></div>} />
+        <Route path="/prompts" element={<PromptLibrary />} />
+        <Route path="/workflows" element={<WorkflowLibrary />} />
+        <Route path="/account" element={<Protected><AccountPage /></Protected>} />
         {/* 携带图生图编辑器：?seedImg=<url>&polishPrompt=<text> */}
         <Route path="/editor" element={<Protected><EditorPage /></Protected>} />
         <Route path="/editor/:projectId" element={<Protected><EditorPage /></Protected>} />

@@ -72,6 +72,19 @@ router.get(
   }),
 )
 
+// GET /api/admin/overview/details?type=generations|activeUsers|credits|failedJobs
+router.get(
+  '/overview/details',
+  asyncHandler(async (req: AuthRequest, res: Response) => {
+    const type = req.query.type as string
+    const page = req.query.page ? Number(req.query.page) : undefined
+    const pageSize = req.query.pageSize ? Number(req.query.pageSize) : undefined
+    if (!type) throw new ValidationError('type 参数必填')
+    const result = await adminService.getOverviewDetails(type as any, { page, pageSize })
+    sendPaginated(res, result)
+  }),
+)
+
 // ===== 用户管理 =====
 // GET /api/admin/users
 router.get(

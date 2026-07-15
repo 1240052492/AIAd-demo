@@ -50,7 +50,7 @@ export interface RegenerateResult {
  */
 export const editorApi = {
   async regenerate(payload: RegeneratePayload): Promise<RegenerateResult> {
-    const { prompt, annotations, seedImg, ratio = '9:16', mock = true } = payload
+    const { prompt, annotations, seedImg, ratio = '9:16', mock = false } = payload
 
     const createResp = await api.post<{ jobId: string; status: string }>('/image-jobs', {
       prompt,

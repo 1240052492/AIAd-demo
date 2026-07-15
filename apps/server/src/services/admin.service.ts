@@ -33,6 +33,25 @@ export type JobWithUser = {
   finishedAt: Date | null
 }
 
+export type OverviewDetailType = 'generations' | 'activeUsers' | 'credits' | 'failedJobs'
+
+export interface OverviewActiveUser {
+  id: string
+  nickname: string | null
+  phone: string | null
+  email: string | null
+  updatedAt: Date
+}
+
+export interface OverviewCreditRow {
+  id: string
+  userId: string
+  userNickname: string
+  amount: number
+  reason: string | null
+  createdAt: Date
+}
+
 export class AdminService {
   /** 数据总览统计（当天 00:00:00 - 23:59:59） */
   async getOverview() {
@@ -56,6 +75,99 @@ export class AdminService {
       creditsConsumed: Math.abs(creditsAgg._sum.amount || 0),
       failedJobs,
     }
+  }
+
+  /** 数据总览明细（按卡片类型返回真实分页数据） */
+  async getOverviewDetails(
+    type: OverviewDetailType,
+    params: { page?: number; pageSize?: number },
+  ): Promise<PaginatedResponse<JobWithUser | OverviewActiveUser | OverviewCreditRow>> {
+    const { page, pageSize, skip, take } = parsePagination(params as any)
+    const now = new Date()
+    const start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0)
+    const end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999)
+
+    if (type === 'failedJobs') {
+      return this.listJobs({ page, pageSize, status: 'failed' })
+    }
+
+    if (type === 'generations') {
+      const where = { createdAt: { gte: start, lte: end } }
+      const [total, rows] = await prisma.$transaction([
+        prisma.generationJob.count({ where }),
+        prisma.generationJob.findMany({
+          where,
+          orderBy: { createdAt: 'desc' },
+          skip,
+          take,
+          include: { user: { select: { nickname: true } } },
+        }),
+      ])
+      const items: JobWithUser[] = rows.map((j: any) => ({
+        id: j.id,
+        userId: j.userId,
+        userNickname: j.user?.nickname || '未知用户',
+        projectId: j.projectId,
+        provider: j.provider,
+        model: j.model,
+        jobType: j.jobType,
+        status: j.status,
+        prompt: j.prompt,
+        creditsFrozen: j.creditsFrozen,
+        creditsConsumed: j.creditsConsumed,
+        errorMessage: j.errorMessage,
+        createdAt: j.createdAt,
+        finishedAt: j.finishedAt,
+      }))
+      return toPaginated(items, total, page, pageSize)
+    }
+
+    if (type === 'activeUsers') {
+      const where = { status: 'active', updatedAt: { gte: start, lte: end } }
+      const [total, rows] = await prisma.$transaction([
+        prisma.user.count({ where }),
+        prisma.user.findMany({
+          where,
+          orderBy: { updatedAt: 'desc' },
+          skip,
+          take,
+          select: { id: true, nickname: true, phone: true, email: true, updatedAt: true },
+        }),
+      ])
+      const items: OverviewActiveUser[] = rows.map((u: any) => ({
+        id: u.id,
+        nickname: u.nickname,
+        phone: u.phone,
+        email: u.email,
+        updatedAt: u.updatedAt,
+      }))
+      return toPaginated(items, total, page, pageSize)
+    }
+
+    if (type === 'credits') {
+      const where = { type: 'consume', createdAt: { gte: start, lte: end } }
+      const [total, rows] = await prisma.$transaction([
+        prisma.creditTransaction.count({ where }),
+        prisma.creditTransaction.findMany({
+          where,
+          orderBy: { createdAt: 'desc' },
+          skip,
+          take,
+          include: { user: { select: { nickname: true } } },
+        }),
+      ])
+      const items: OverviewCreditRow[] = rows.map((t: any) => ({
+        id: t.id,
+        userId: t.userId,
+        userNickname: t.user?.nickname || '未知用户',
+        amount: Math.abs(t.amount),
+        reason: t.reason,
+        createdAt: t.createdAt,
+      }))
+      return toPaginated(items, total, page, pageSize)
+    }
+
+    throw new ValidationError('未知的详情类型')
   }
 
   /** 用户列表（分页 + 搜索） */

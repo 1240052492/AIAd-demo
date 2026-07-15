@@ -72,7 +72,8 @@ router.post('/brief', requirePermission('canGenerate'), async (req: Request, res
     // ── 离线演示模式（mock）────────────────────────────────────────────
     // 当请求体 mock === true 时跳过 AI 网关与积分冻结，直接返回结构化示例 Brief，
     // 使首页「生成方案」在无网关时也能跑通（与 image-jobs 的 mock 分支对齐）。
-    if (req.body?.mock === true) {
+    // 生产护栏：仅当显式设置 ALLOW_MOCK=true 才允许；否则忽略 mock 标志走真实网关。
+    if (req.body?.mock === true && process.env.ALLOW_MOCK === 'true') {
       const bt = (businessType || '').trim()
       const mat = typeof constraints?.material === 'string' ? constraints.material : ''
       const sty = typeof constraints?.style === 'string' ? constraints.style : ''
@@ -159,7 +160,8 @@ router.post('/prompt', requirePermission('canGenerate'), async (req: Request, re
 
     // ── 离线演示模式（mock）────────────────────────────────────────────
     // 当请求体 mock === true 时跳过 AI 网关与积分冻结，直接返回多风格提示词示例。
-    if (req.body?.mock === true) {
+    // 生产护栏：仅当显式设置 ALLOW_MOCK=true 才允许；否则忽略 mock 标志走真实网关。
+    if (req.body?.mock === true && process.env.ALLOW_MOCK === 'true') {
       const b = (brief ?? {}) as Record<string, unknown>
       const base = `a high-quality advertising visual for ${
         (b.storeName as string) || 'a local store'

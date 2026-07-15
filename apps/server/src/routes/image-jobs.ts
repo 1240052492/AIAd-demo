@@ -119,7 +119,10 @@ router.post('/', requirePermission('canGenerate'), async (req: Request, res: Res
     const n = Math.min(Math.max(parseInt(String(count || '1'), 10) || 1, 1), 4)
     const size = resolveSize(ratio)
     const imageCreditCost = await creditRuleService.getCost('imageGeneration')
-    const mock = req.body?.mock === true
+    // 生产护栏：仅当显式设置 ALLOW_MOCK=true 时才允许 mock 短路；
+    // 否则即使请求体携带 mock:true 也强制走真实生图路径（生产永不可被 mock）。
+    const allowMock = process.env.ALLOW_MOCK === 'true'
+    const mock = req.body?.mock === true && allowMock
     const creditCost = mock ? 0 : n * imageCreditCost
     // 生成消耗按积分规则标准扣减；代理 0.7 仅用于充值付款金额，不影响消费积分。
     const requiredVisibleTexts = normalizeRequiredVisibleTexts(req.body?.requiredVisibleTexts)

@@ -27,17 +27,33 @@ export interface StatCardProps {
   trend?: 'up' | 'down' | 'warning'
   tone?: StatTone
   icon?: React.ReactNode
+  /** 点击回调；提供后卡片变为可点击 */
+  onClick?: () => void
 }
 
 /** 暗色主题统计卡片，左侧色条指示趋势 */
-export function StatCard({ title, value, delta, trend = 'up', tone = 'gray', icon }: StatCardProps) {
+export function StatCard({ title, value, delta, trend = 'up', tone = 'gray', icon, onClick }: StatCardProps) {
   const deltaColor =
     trend === 'warning' ? 'text-red' : trend === 'down' ? 'text-red' : 'text-green'
 
   return (
     <div
+      role={onClick ? 'button' : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      onClick={onClick}
+      onKeyDown={
+        onClick
+          ? (e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault()
+                onClick()
+              }
+            }
+          : undefined
+      }
       className={cn(
         'panel-card border-l-2 p-4 transition-colors hover:bg-panel-2/60',
+        onClick && 'cursor-pointer',
         toneBorder[tone],
       )}
     >

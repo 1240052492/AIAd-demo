@@ -1,4 +1,4 @@
-import { ChangeEvent, useMemo, useState } from 'react'
+import { ChangeEvent, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import {
@@ -53,6 +53,7 @@ import {
   type ActiveTab,
   type JobWithResponse,
 } from '@/stores/generation'
+import { usePromptSeed } from '@/stores/promptSeed'
 
 type RunMode = 'mock' | 'live'
 
@@ -144,7 +145,7 @@ export default function HomePage() {
   const [style, setStyle] = useState(DEFAULT_STYLE)
   const [styleCustom, setStyleCustom] = useState('')
   const [model, setModel] = useState(MODEL_OPTIONS[0].code)
-  const [runMode, setRunMode] = useState<RunMode>('mock')
+  const [runMode, setRunMode] = useState<RunMode>('live')
   const [ratio, setRatio] = useState('16:9')
   const [quality, setQuality] = useState('high')
   const [count] = useState(1)
@@ -155,6 +156,18 @@ export default function HomePage() {
   const [validating, setValidating] = useState(false)
   const [correcting, setCorrecting] = useState(false)
   const [creditRules, setCreditRules] = useState<Record<string, number>>({})
+
+  // 提示词库「使用此提示词」→ 填入客户需求输入框（解耦桥，见 @/stores/promptSeed）
+  const seedPrompt = usePromptSeed((s) => s.seedPrompt)
+  const clearSeedPrompt = usePromptSeed((s) => s.clearSeedPrompt)
+  useEffect(() => {
+    if (seedPrompt && seedPrompt.trim()) {
+      setCustomerText(seedPrompt.trim())
+      clearSeedPrompt()
+      toast.success('已将该提示词填入客户需求')
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seedPrompt])
 
   // 生图进度与结果来自全局 store：切换路由组件卸载重建后依然保留，
   // 生图轮询在 store action 中执行（脱离组件生命周期），因此「生成中切页再切回」不会中断。

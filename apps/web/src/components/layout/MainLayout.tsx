@@ -24,8 +24,9 @@ import { Profile } from '@/pages/Membership/Profile'
 const TOP_NAV = [
   { label: '首页生成', to: '/' },
   { label: '模板库', to: '/templates' },
+  { label: '提示词库', to: '/prompts' },
   { label: '工作流库', to: '/workflows' },
-  { label: '案例库', to: '/cases' },
+  { label: '个人中心', to: '/account' },
 ]
 
 /** 左侧 Rail 导航项 */

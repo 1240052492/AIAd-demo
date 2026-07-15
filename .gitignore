@@ -57,3 +57,9 @@ data/
 *.rar
 *.zip
 *.7z
+
+# Local test artifacts (failed E2E runs, not project source)
+e2e_shots/
+
+# IMA personal knowledge-base import bundle (out-of-scope for this repo)
+docs/IMA测试知识库导入版/

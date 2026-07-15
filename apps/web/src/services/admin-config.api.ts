@@ -131,6 +131,27 @@ export interface OverviewData {
   failedJobs: number
 }
 
+export type OverviewDetailType = 'generations' | 'activeUsers' | 'credits' | 'failedJobs'
+
+export interface OverviewActiveUser {
+  id: string
+  nickname: string | null
+  phone: string | null
+  email: string | null
+  updatedAt: string
+}
+
+export interface OverviewCreditRow {
+  id: string
+  userId: string
+  userNickname: string
+  amount: number
+  reason: string | null
+  createdAt: string
+}
+
+export type OverviewDetailRow = GenerationJob | OverviewActiveUser | OverviewCreditRow
+
 export interface ProviderConfig {
   id: string
   provider: string
@@ -254,6 +275,13 @@ export const adminConfigApi = {
 
   // ---- 数据总览 ----
   getOverview: () => adminRequest<OverviewData>('GET', '/admin/overview'),
+  getOverviewDetails: (params: { type: OverviewDetailType; page?: number; pageSize?: number }) => {
+    const qs = new URLSearchParams()
+    qs.set('type', params.type)
+    if (params.page !== undefined) qs.set('page', String(params.page))
+    if (params.pageSize !== undefined) qs.set('pageSize', String(params.pageSize))
+    return adminRequest<PaginatedResponse<OverviewDetailRow>>('GET', `/admin/overview/details?${qs.toString()}`)
+  },
 
   // ---- Provider 配置 ----
   getProviderConfigs: () => adminRequest<ProviderConfig[]>('GET', '/admin/provider-configs'),

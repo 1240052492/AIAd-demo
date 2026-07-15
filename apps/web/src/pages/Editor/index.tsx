@@ -100,7 +100,7 @@ export default function EditorPage() {
         prompt: promptText,
         annotations,
         seedImg: seedImg || undefined,
-        mock: true,
+        mock: false,
       })
       const url = imageUrl || fallbackImage(promptText)
       fabricRef.current?.addImage(url, { name: '重新生成结果', width: 560 })
