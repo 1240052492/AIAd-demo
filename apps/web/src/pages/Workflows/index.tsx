@@ -200,6 +200,8 @@ function StepCardMobile({ step, last }: { step: WorkflowStep; last: boolean }) {
   )
 }
 
+const MAX_WORKFLOW_INPUT = 8000
+
 export default function WorkflowLibrary() {
   const [projectId, setProjectId] = useState('')
   const [userInput, setUserInput] = useState('')
@@ -211,6 +213,8 @@ export default function WorkflowLibrary() {
   const capabilities = useQuery({ queryKey: ['capabilities'], queryFn: capabilityApi.get })
   const items = projects.data?.data.items ?? []
   const textAvailable = Boolean(capabilities.data?.data.textGeneration)
+  const inputLen = userInput.length
+  const inputOverLimit = inputLen > MAX_WORKFLOW_INPUT
 
   useEffect(() => {
     if (!projectId && items[0]) setProjectId(items[0].id)
@@ -218,6 +222,10 @@ export default function WorkflowLibrary() {
 
   async function runWorkflow() {
     if (!projectId) return
+    if (inputOverLimit) {
+      toast.error(`补充要求过长（${inputLen}/${MAX_WORKFLOW_INPUT} 字），请删减后再运行`)
+      return
+    }
     setRunning(true)
     try {
       await aiApi.runWorkflow(projectId, userInput)
@@ -253,13 +261,35 @@ export default function WorkflowLibrary() {
             {items.length === 0 ? <option value="">暂无项目</option> : items.map((project) => <option key={project.id} value={project.id}>{project.title}</option>)}
           </select>
         </label>
-        <label>
-          <span className="mb-1.5 block text-xs font-semibold text-muted">补充要求</span>
-          <input value={userInput} onChange={(event) => setUserInput(event.target.value)} placeholder="可选：补充预算、交期或审核重点" className="h-10 w-full rounded-card border border-border bg-bg px-3 text-sm" />
+        <label className="min-w-0">
+          <span className="mb-1.5 flex items-center justify-between gap-2 text-xs font-semibold text-muted">
+            <span>补充要求</span>
+            <span className={inputOverLimit ? 'text-red' : 'text-muted'}>
+              {inputLen} / {MAX_WORKFLOW_INPUT}
+            </span>
+          </span>
+          <textarea
+            value={userInput}
+            onChange={(event) => setUserInput(event.target.value)}
+            placeholder="可选：补充预算、交期或审核重点（最长 8000 字）"
+            rows={2}
+            className={cn(
+              'min-h-[40px] w-full resize-y rounded-card border bg-bg px-3 py-2 text-sm outline-none',
+              inputOverLimit ? 'border-red/60' : 'border-border focus:border-blue/50',
+            )}
+          />
+          {inputOverLimit ? (
+            <p className="mt-1 text-[11px] text-red">已超过服务端安全上限，请删减后再运行。</p>
+          ) : null}
         </label>
-        <button type="button" onClick={runWorkflow} disabled={running || !projectId || !textAvailable} className="btn-primary h-10">
+        <button
+          type="button"
+          onClick={runWorkflow}
+          disabled={running || !projectId || !textAvailable || inputOverLimit}
+          className="btn-primary h-10"
+        >
           {running ? <Loader2 size={15} className="animate-spin" /> : <Play size={15} />}
-          {textAvailable ? '运行工作流' : '文本模型未配置'}
+          {!textAvailable ? '文本服务未配置' : inputOverLimit ? '字数超限' : '运行工作流'}
         </button>
       </section>
 

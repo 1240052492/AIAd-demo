@@ -165,8 +165,18 @@ export interface ProviderConfig {
   updatedAt: string
 }
 export type ProviderConfigInput = Partial<
-  Pick<ProviderConfig, 'displayName' | 'baseUrl' | 'model' | 'enabled' | 'priority'>
+  Pick<ProviderConfig, 'provider' | 'displayName' | 'baseUrl' | 'model' | 'enabled' | 'priority' | 'configJson'>
 >
+
+export type ProviderConfigCreate = {
+  provider: string
+  displayName: string
+  baseUrl?: string
+  model?: string
+  enabled?: boolean
+  priority?: number
+  configJson?: unknown
+}
 
 export type CreditRules = {
   registerBonus: number
@@ -209,6 +219,8 @@ export interface GenerationJob {
   creditsFrozen?: number | null
   creditsConsumed?: number | null
   errorMessage?: string | null
+  responseJson?: unknown
+  requestJson?: unknown
   createdAt: string
   finishedAt?: string | null
 }
@@ -283,15 +295,49 @@ export const adminConfigApi = {
     return adminRequest<PaginatedResponse<OverviewDetailRow>>('GET', `/admin/overview/details?${qs.toString()}`)
   },
 
-  // ---- Provider 配置 ----
+  // ---- Provider 配置（增删改查；敏感 key 不经前端） ----
   getProviderConfigs: () => adminRequest<ProviderConfig[]>('GET', '/admin/provider-configs'),
+  createProviderConfig: (data: ProviderConfigCreate) =>
+    adminRequest<ProviderConfig>('POST', '/admin/provider-configs', data),
   updateProviderConfig: (id: string, data: ProviderConfigInput) =>
     adminRequest<ProviderConfig>('PATCH', `/admin/provider-configs/${id}`, data),
+  deleteProviderConfig: (id: string) =>
+    adminRequest<{ id: string }>('DELETE', `/admin/provider-configs/${id}`),
 
   // ---- 积分规则 ----
   getCreditRules: () => adminRequest<CreditRules>('GET', '/admin/credit-rules'),
   updateCreditRules: (data: CreditRules) =>
     adminRequest<CreditRules>('PUT', '/admin/credit-rules', data),
+
+  /** 管理员全量积分流水：GET /api/admin/credit-transactions（非 overview/details） */
+  getCreditTransactions: (params?: {
+    page?: number
+    pageSize?: number
+    type?: string
+    search?: string
+  }) => {
+    const qs = new URLSearchParams()
+    if (params?.page !== undefined) qs.set('page', String(params.page))
+    if (params?.pageSize !== undefined) qs.set('pageSize', String(params.pageSize))
+    if (params?.type) qs.set('type', params.type)
+    if (params?.search) qs.set('search', params.search)
+    return adminRequest<
+      PaginatedResponse<{
+        id: string
+        userId: string
+        userName: string
+        userEmail: string | null
+        type: string
+        amount: number
+        balanceAfter: number
+        reason: string | null
+        relatedType: string | null
+        relatedId: string | null
+        operatorName: string | null
+        createdAt: string
+      }>
+    >('GET', `/admin/credit-transactions?${qs.toString()}`)
+  },
 
   // ---- 工作流模板 ----
   listWorkflows: (params?: { page?: number; pageSize?: number; businessType?: string }) =>
@@ -307,13 +353,18 @@ export const adminConfigApi = {
     adminRequest<unknown>('DELETE', `/admin/workflows/${id}`),
 
   // ---- 生成任务队列 ----
-  listJobs: (params?: { page?: number; pageSize?: number; status?: string; jobType?: string }) =>
-    adminRequest<PaginatedResponse<GenerationJob>>(
-      'GET',
-      `/admin/generation-jobs?${new URLSearchParams((params as Record<string, string>) ?? {}).toString()}`,
-    ),
-  retryJob: (id: string) =>
-    adminRequest<GenerationJob>('POST', `/admin/generation-jobs/${id}/retry`),
+  listJobs: (params?: { page?: number; pageSize?: number; status?: string; jobType?: string }) => {
+    const qs = new URLSearchParams()
+    if (params?.page !== undefined) qs.set('page', String(params.page))
+    if (params?.pageSize !== undefined) qs.set('pageSize', String(params.pageSize))
+    if (params?.status) qs.set('status', params.status)
+    if (params?.jobType) qs.set('jobType', params.jobType)
+    return adminRequest<PaginatedResponse<GenerationJob>>('GET', `/admin/generation-jobs?${qs.toString()}`)
+  },
+  getJob: (id: string) => adminRequest<GenerationJob & { responseJson?: unknown }>('GET', `/admin/generation-jobs/${id}`),
+  retryJob: (id: string) => adminRequest<GenerationJob>('POST', `/admin/generation-jobs/${id}/retry`),
+  pauseJob: (id: string) => adminRequest<GenerationJob>('POST', `/admin/generation-jobs/${id}/pause`),
+  refundJob: (id: string) => adminRequest<GenerationJob>('POST', `/admin/generation-jobs/${id}/refund`),
 
   // ---- 系统设置 ----
   getSettings: () => adminRequest<SiteSettings>('GET', '/admin/settings'),

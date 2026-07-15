@@ -139,6 +139,10 @@ const imageWorker = new Worker(
     const credits = Number.isFinite(parsedCredits) ? parsedCredits : count * 2
 
     try {
+      const existing = await prisma.generationJob.findUnique({ where: { id: jobId }, select: { status: true } })
+      if (existing?.status === 'paused' || existing?.status === 'canceled') {
+        return { status: existing.status }
+      }
       // 1. 更新状态为 processing
       await prisma.generationJob.update({
         where: { id: jobId },
@@ -179,6 +183,11 @@ const imageWorker = new Worker(
         throw new Error(errorMsg || '生图任务超时或失败')
       }
 
+      const beforeSave = await prisma.generationJob.findUnique({ where: { id: jobId }, select: { status: true } })
+      if (beforeSave?.status === 'paused' || beforeSave?.status === 'canceled') {
+        return { status: beforeSave.status }
+      }
+
       // 4. 下载图片、落盘、创建 Asset
       emitProgress(jobId, 'downloading', 70)
       const assets: Array<{ assetId: string; url: string }> = []
@@ -203,6 +212,10 @@ const imageWorker = new Worker(
       // 5. 扣减冻结积分（同步，先于标记成功）——避免「先标记成功再异步扣减」窗口期内的白嫖（F4）。
       //    扣减失败（冻结余额异常等）则标记任务失败并向上抛，由失败补偿链路处理冻结积分。
       emitProgress(jobId, 'saving', 90)
+      const beforeConsume = await prisma.generationJob.findUnique({ where: { id: jobId }, select: { status: true } })
+      if (beforeConsume?.status === 'paused' || beforeConsume?.status === 'canceled') {
+        return { status: beforeConsume.status }
+      }
       if (credits > 0) {
         try {
           await creditService.consume(userId, credits, {
@@ -294,6 +307,10 @@ const compositionWorker = new Worker(
     const credits = Number.isFinite(parsedCredits) ? parsedCredits : 1
 
     try {
+      const existing = await prisma.generationJob.findUnique({ where: { id: jobId }, select: { status: true } })
+      if (existing?.status === 'paused' || existing?.status === 'canceled') {
+        return { status: existing.status }
+      }
       await prisma.generationJob.update({
         where: { id: jobId },
         data: { status: 'processing', startedAt: new Date(), jobType: 'composition' },
@@ -317,6 +334,11 @@ const compositionWorker = new Worker(
         },
         { userId, projectId, generationJobId: jobId },
       )
+
+      const beforeConsume = await prisma.generationJob.findUnique({ where: { id: jobId }, select: { status: true } })
+      if (beforeConsume?.status === 'paused' || beforeConsume?.status === 'canceled') {
+        return { status: beforeConsume.status }
+      }
 
       // 扣减冻结积分（同步，先于标记成功），失败则标记失败并向上抛（F4）
       if (credits > 0) {

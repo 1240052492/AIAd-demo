@@ -114,11 +114,16 @@ interface GenerationState {
   ratio: string
   model: string
   error?: string
+  /** 最近一次完整 generate 参数，供失败重试 */
+  lastGenerateConfig?: GenerateConfig | null
 
   /** 完整生图流程：在 store action 中执行，组件卸载不影响轮询 */
   generate: (config: GenerateConfig) => Promise<void>
   /** 用当前提示词重新生成 */
   regenerateWithPrompt: (config: RegenerateConfig) => Promise<void>
+  /** 用 lastGenerateConfig 重试完整流程 */
+  retryLast: () => Promise<void>
+  clearError: () => void
   setActiveTab: (tab: ActiveTab) => void
   setPromptText: (value: string) => void
   setOriginalPromptText: (value: string) => void
@@ -207,7 +212,7 @@ export const useGenerationStore = create<GenerationState>()((set, get) => {
       } catch (err) {
         partial = true
         set({ activeTab: 'original' })
-        toast.warning(`广告原图已生成，但环境合成失败：${err instanceof Error ? err.message : '未知错误'}`)
+        toast.warning(`效果图已生成，但环境合成失败：${err instanceof Error ? err.message : '未知错误'}`)
       }
     } else {
       set({ activeTab: 'original' })
@@ -217,7 +222,7 @@ export const useGenerationStore = create<GenerationState>()((set, get) => {
     } catch (err) {
       partial = true
       await syncCreditBalance().catch(() => undefined)
-      toast.warning(`位图结果已保留，但 SVG 导出失败：${err instanceof Error ? err.message : '未知错误'}`)
+      toast.warning(`效果图已保留，但矢量导出失败：${err instanceof Error ? err.message : '未知错误'}`)
     }
     return partial
   }
@@ -238,11 +243,13 @@ export const useGenerationStore = create<GenerationState>()((set, get) => {
     ratio: '16:9',
     model: '',
     error: undefined,
+    lastGenerateConfig: null,
 
     generate: async (config) => {
       set({
         busy: true,
         error: undefined,
+        lastGenerateConfig: config,
         projectId: undefined,
         promptText: '',
         originalPromptText: '',
@@ -307,11 +314,15 @@ export const useGenerationStore = create<GenerationState>()((set, get) => {
           visibleTexts: config.visibleTexts,
         })
         const partial = await createOptionalOutputs(nextProjectId, original, uploadedEnv, config.visibleTexts)
-        toast.success(partial ? '广告原图已生成，部分附加输出未完成' : '工作台方案已生成')
+        set({ error: undefined })
+        toast.success(partial ? '效果图已生成，部分附加结果未完成' : '设计方案已生成')
       } catch (err) {
         const message = err instanceof Error ? err.message : '生成失败'
-        set({ error: message })
-        toast.error(message)
+        const failedJob = get().originalJob
+        set({
+          error: failedJob?.errorMessage || message,
+        })
+        toast.error(failedJob?.errorMessage || message)
       } finally {
         await syncCreditBalance().catch(() => undefined)
         set({ busy: false })
@@ -319,7 +330,7 @@ export const useGenerationStore = create<GenerationState>()((set, get) => {
     },
 
     regenerateWithPrompt: async (config) => {
-      set({ busy: true, correctionDraft: null, showSourceImage: false })
+      set({ busy: true, correctionDraft: null, showSourceImage: false, error: undefined })
       try {
         const original = await submitOriginal(config.projectId, config.promptText, config.mock, config.promptText, {
           count: 1,
@@ -333,17 +344,30 @@ export const useGenerationStore = create<GenerationState>()((set, get) => {
           config.environmentAsset,
           config.visibleTexts,
         )
-        toast.success(partial ? '原图已重新生成，部分附加输出未完成' : '已按当前提示词重新生成')
+        set({ error: undefined })
+        toast.success(partial ? '效果图已重新生成，部分附加结果未完成' : '已按当前描述重新生成')
       } catch (err) {
         const message = err instanceof Error ? err.message : '重新生成失败'
-        set({ error: message })
-        toast.error(message)
+        const failedJob = get().originalJob
+        set({ error: failedJob?.errorMessage || message })
+        toast.error(failedJob?.errorMessage || message)
       } finally {
         await syncCreditBalance().catch(() => undefined)
         set({ busy: false })
       }
     },
 
+    retryLast: async () => {
+      const config = get().lastGenerateConfig
+      if (!config) {
+        toast.error('没有可重试的生成参数，请重新填写需求后生成')
+        return
+      }
+      // File 对象在内存中仍可复用；若环境图仅有 Asset 则用 Asset
+      await get().generate(config)
+    },
+
+    clearError: () => set({ error: undefined }),
     setActiveTab: (tab) => set({ activeTab: tab }),
     setPromptText: (value) => set({ promptText: value }),
     setOriginalPromptText: (value) => set({ originalPromptText: value }),
@@ -367,6 +391,7 @@ export const useGenerationStore = create<GenerationState>()((set, get) => {
         showSourceImage: false,
         correctionDraft: null,
         error: undefined,
+        lastGenerateConfig: null,
       }),
   }
 })

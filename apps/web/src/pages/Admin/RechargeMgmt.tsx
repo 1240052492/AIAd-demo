@@ -81,14 +81,13 @@ export function RechargeMgmtPanel() {
 
   return (
     <div className="space-y-5">
-      <PageHeader title="积分管理" desc="查看预留充值订单与积分处理记录" />
+      <PageHeader title="充值管理" desc="查看用户充值意向与订单状态。在线支付未接入时，订单多为待支付/手工处理。" />
 
       <div className="flex items-start gap-2 rounded-btn border border-blue/30 bg-blue/8 px-4 py-3 text-sm">
         <Info size={16} className="mt-0.5 shrink-0 text-blue" />
         <p className="text-muted">
-          积分兑换规则：<span className="font-medium text-text">1 元 = 10 积分</span>；
-          首次充值额外赠送 <span className="font-medium text-text">50 积分</span>（均为服务端常量，此处仅作说明展示）。
-          下表为所有用户的充值订单记录。
+          参考兑换：<span className="font-medium text-text">1 元 ≈ 10 积分</span>
+          （首充赠送等规则以服务端为准）。用户端不会假到账，需管理员在「用户与权限」中调账。
         </p>
       </div>
 

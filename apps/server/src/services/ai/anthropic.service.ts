@@ -201,12 +201,39 @@ export class AnthropicService {
  * 从 OpenAI ChatCompletion 响应中提取拼接后的纯文本。
  */
 function extractText(completion: OpenAI.Chat.Completions.ChatCompletion): string {
-  const texts: string[] = []
-  for (const choice of completion.choices) {
-    const content = choice.message?.content
-    if (content) texts.push(content)
+  const payload = completion as unknown as Record<string, unknown>
+  const choices = Array.isArray(payload.choices)
+    ? payload.choices
+    : Array.isArray(payload.completionChoices)
+      ? payload.completionChoices
+      : []
+  if (choices.length === 0) {
+    throw new Error('AI 文本 Provider 返回格式异常：缺少可用 choices')
   }
-  return texts.join('').trim()
+
+  const texts: string[] = []
+  for (const rawChoice of choices) {
+    if (!rawChoice || typeof rawChoice !== 'object') continue
+    const choice = rawChoice as Record<string, unknown>
+    const message = choice.message
+    const content =
+      message && typeof message === 'object'
+        ? (message as Record<string, unknown>).content
+        : choice.content ?? choice.text
+    if (typeof content === 'string') {
+      texts.push(content)
+    } else if (Array.isArray(content)) {
+      for (const part of content) {
+        if (typeof part === 'string') texts.push(part)
+        else if (part && typeof part === 'object' && typeof (part as Record<string, unknown>).text === 'string') {
+          texts.push((part as Record<string, string>).text)
+        }
+      }
+    }
+  }
+  const text = texts.join('').trim()
+  if (!text) throw new Error('AI 文本 Provider 返回格式异常：未找到文本内容')
+  return text
 }
 
 /**

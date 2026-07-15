@@ -3,6 +3,7 @@ import { prisma, imageQueue, compositionQueue } from '../config'
 import { NotFoundError, ValidationError, InsufficientBalanceError } from '../utils/errors'
 import { PaginatedResponse } from '../types/common'
 import { parsePagination, toPaginated } from '../utils/pagination'
+import { creditService } from './credit.service'
 
 export type UserWithCredit = {
   id: string
@@ -49,6 +50,21 @@ export interface OverviewCreditRow {
   userNickname: string
   amount: number
   reason: string | null
+  createdAt: Date
+}
+
+export interface AdminCreditTransactionRow {
+  id: string
+  userId: string
+  userName: string
+  userEmail: string | null
+  type: string
+  amount: number
+  balanceAfter: number
+  reason: string | null
+  relatedType: string | null
+  relatedId: string | null
+  operatorName: string | null
   createdAt: Date
 }
 
@@ -168,6 +184,71 @@ export class AdminService {
     }
 
     throw new ValidationError('未知的详情类型')
+  }
+
+  /** 管理员积分流水（全量分页，支持按类型和用户检索）。 */
+  async listCreditTransactions(params: {
+    page?: number
+    pageSize?: number
+    type?: string
+    search?: string
+  }): Promise<PaginatedResponse<AdminCreditTransactionRow>> {
+    const { page, pageSize, skip, take } = parsePagination(params as any)
+    const search = params.search?.trim()
+    const where: any = {}
+    if (params.type) where.type = params.type
+    if (search) {
+      where.user = {
+        OR: [
+          { nickname: { contains: search, mode: 'insensitive' } },
+          { email: { contains: search, mode: 'insensitive' } },
+          { phone: { contains: search } },
+        ],
+      }
+    }
+
+    const [total, rows] = await prisma.$transaction([
+      prisma.creditTransaction.count({ where }),
+      prisma.creditTransaction.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take,
+        include: {
+          user: { select: { nickname: true, email: true, phone: true } },
+        },
+      }),
+    ])
+
+    const operatorIds = rows
+      .map((row) => row.operatorId)
+      .filter((id): id is string => Boolean(id))
+    const operators = operatorIds.length
+      ? await prisma.user.findMany({
+          where: { id: { in: operatorIds } },
+          select: { id: true, nickname: true, email: true },
+        })
+      : []
+    const operatorMap = new Map(operators.map((operator) => [operator.id, operator]))
+
+    const items: AdminCreditTransactionRow[] = rows.map((row) => {
+      const operator = row.operatorId ? operatorMap.get(row.operatorId) : undefined
+      return {
+        id: row.id,
+        userId: row.userId,
+        userName: row.user.nickname || row.user.phone || row.user.email || '未知用户',
+        userEmail: row.user.email,
+        type: row.type,
+        amount: row.amount,
+        balanceAfter: row.balanceAfter,
+        reason: row.reason,
+        relatedType: row.relatedType,
+        relatedId: row.relatedId,
+        operatorName: operator?.nickname || operator?.email || null,
+        createdAt: row.createdAt,
+      }
+    })
+    return toPaginated(items, total, page, pageSize)
   }
 
   /** 用户列表（分页 + 搜索） */
@@ -464,6 +545,18 @@ export class AdminService {
     const job = await prisma.generationJob.findUnique({ where: { id: jobId } })
     if (!job) throw new NotFoundError('任务不存在')
 
+    if (!['failed', 'canceled'].includes(job.status)) {
+      throw new ValidationError('仅失败或已取消的任务可以重试')
+    }
+    const request = (job.requestJson as Record<string, any> | null) ?? {}
+    if (job.creditsFrozen > 0) {
+      await creditService.freeze(job.userId, job.creditsFrozen, {
+        reason: '管理员重试任务冻结积分',
+        relatedType: 'job',
+        relatedId: job.id,
+        operatorId: undefined,
+      })
+    }
     const updated = await prisma.generationJob.update({
       where: { id: jobId },
       data: {
@@ -476,26 +569,77 @@ export class AdminService {
     })
 
     // 重新投递到对应队列，供 Worker 消费
-    const payload = {
-      generationJobId: job.id,
-      jobType: job.jobType,
-      provider: job.provider,
-      model: job.model,
-      prompt: job.prompt,
-      requestJson: job.requestJson,
-      userId: job.userId,
-      projectId: job.projectId,
-    }
+    const payload = job.jobType === 'composition'
+      ? {
+          jobId: job.id,
+          userId: job.userId,
+          projectId: job.projectId,
+          environmentAssetId: request.environmentAssetId,
+          designAssetId: request.designAssetId,
+          position: request.position,
+          outputFormat: request.outputFormat || 'png',
+          creditsFrozen: job.creditsFrozen,
+        }
+      : {
+          jobId: job.id,
+          userId: job.userId,
+          projectId: job.projectId,
+          prompt: job.prompt || request.prompt || '',
+          count: Number(request.count) || 1,
+          model: job.model,
+          ratio: request.ratio || '16:9',
+          size: request.size || '1024x1024',
+          creditsFrozen: job.creditsFrozen,
+        }
     try {
       if (job.jobType === 'composition') {
-        await compositionQueue.add('composition', payload)
+        await compositionQueue.add('compose', payload)
       } else {
-        await imageQueue.add('image-generation', payload)
+        await imageQueue.add('generate', payload)
       }
     } catch {
       // 队列不可用时仅重置状态，等待 Worker 后续拉取
     }
     return updated
+  }
+
+  /** 暂停尚未完成的任务。已进入外部供应商请求的任务属于协作式暂停。 */
+  async pauseJob(jobId: string) {
+    const job = await prisma.generationJob.findUnique({ where: { id: jobId } })
+    if (!job) throw new NotFoundError('任务不存在')
+    if (!['queued', 'submitted', 'processing'].includes(job.status)) {
+      throw new ValidationError('仅排队中或处理中的任务可以暂停')
+    }
+    return prisma.generationJob.update({
+      where: { id: jobId },
+      data: { status: 'paused' },
+    })
+  }
+
+  /** 管理员手动取消任务并退回仍冻结的积分。只允许未完成任务，避免重复退回。 */
+  async refundJob(jobId: string, operatorId: string) {
+    const job = await prisma.generationJob.findUnique({ where: { id: jobId } })
+    if (!job) throw new NotFoundError('任务不存在')
+    if (!['queued', 'submitted', 'processing', 'paused'].includes(job.status)) {
+      throw new ValidationError('仅未完成任务可以手动退还积分')
+    }
+    if (job.creditsFrozen > 0) {
+      await creditService.refund(job.userId, job.creditsFrozen, {
+        reason: '管理员手动退还任务积分',
+        relatedType: 'job',
+        relatedId: job.id,
+        operatorId,
+      })
+    }
+    return prisma.generationJob.update({
+      where: { id: jobId },
+      data: {
+        status: 'canceled',
+        creditsFrozen: 0,
+        finishedAt: new Date(),
+        errorMessage: '管理员手动取消并退还积分',
+      },
+    })
   }
 }
 

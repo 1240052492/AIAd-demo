@@ -214,11 +214,9 @@ router.post('/refresh', async (req, res, next) => {
     }
     const roles = Array.isArray(payload.roles) ? (payload.roles as string[]) : []
 
-    // 旋转：使旧 refresh 立即失效（加入黑名单，exp 为其剩余有效期）
-    if (jti) {
-      const remaining = remainingSeconds(payload.exp as number | undefined)
-      if (remaining > 0) await addToBlacklist(jti, remaining)
-    }
+    // 并发容错：同一页面刷新时可能有多个请求同时携带旧 refresh token。
+    // 不能在本次响应前立刻拉黑旧 token，否则其中一个请求成功轮换后，另一个并发请求
+    // 会被误判为未登录并把用户送回登录页。旧 token 仍受签名和过期时间保护，登出时仍会拉黑。
 
     const { accessToken, expiresIn } = signAccessToken(userId, roles)
     const { refreshToken: newRefresh } = signRefreshToken(userId, roles)

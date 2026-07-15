@@ -3,6 +3,7 @@ import { authMiddleware } from '../middleware/auth'
 import { CreditService } from '../services/credit.service'
 import { creditRuleService } from '../services/credit-rule.service'
 import { ok, fail } from '../utils/response'
+import { rechargeService } from '../services/recharge.service'
 
 const router = Router()
 const creditService = new CreditService()
@@ -39,10 +40,21 @@ router.get('/transactions', authMiddleware, async (req, res, next) => {
   }
 })
 
-/** POST /api/credits/recharge - 第一阶段未接支付，禁止客户端自行模拟到账 */
+/** POST /api/credits/recharge - 创建待支付订单，不在客户端直接发放积分 */
 router.post('/recharge', authMiddleware, async (req, res, next) => {
   try {
-    return fail(res, 403, '在线充值尚未开放，请联系管理员调整积分')
+    const amount = Number(req.body?.amount)
+    if (!Number.isInteger(amount) || amount <= 0) {
+      return fail(res, 400, '充值金额必须为正整数（单位：分）')
+    }
+    const order = await rechargeService.createOrder(req.user!.id, amount, 'alipay')
+    return ok(res, {
+      order,
+      payment: {
+        status: 'pending',
+        message: '支付宝支付参数尚未配置，请等待支付回调或联系管理员处理。订单未到账。',
+      },
+    })
   } catch (err) {
     next(err)
   }

@@ -6,12 +6,12 @@ import { cn } from '@/utils/cn'
 import { adminConfigApi, type CreditRules as CreditRulesType } from '@/services/admin-config.api'
 
 const RULE_META: { key: keyof CreditRulesType; action: string; desc: string }[] = [
-  { key: 'registerBonus', action: '注册赠送', desc: '新用户注册赠送积分' },
-  { key: 'imageGeneration', action: '视觉生图', desc: '每次 GPT-image-2 生图（单张）' },
-  { key: 'composition', action: '环境合成', desc: '套入门头 / 墙体照片合成' },
-  { key: 'exportPng', action: '导出 PNG', desc: '导出 PNG 文件' },
+  { key: 'registerBonus', action: '注册赠送', desc: '新用户注册成功后赠送的积分' },
+  { key: 'imageGeneration', action: '效果图生成', desc: '每生成一张广告效果图消耗的积分' },
+  { key: 'composition', action: '环境合成', desc: '将效果图合成到门店环境照片' },
+  { key: 'exportPng', action: '导出 PNG', desc: '导出 PNG 图片文件' },
   { key: 'exportPdf', action: '导出 PDF', desc: '导出 PDF 文件' },
-  { key: 'exportSvg', action: '导出 SVG', desc: '导出 SVG 文件' },
+  { key: 'exportSvg', action: '导出矢量', desc: '导出 SVG 矢量文件' },
 ]
 
 const DEFAULTS: CreditRulesType = {

@@ -228,6 +228,20 @@ router.put(
   }),
 )
 
+// GET /api/admin/credit-transactions - 管理员积分流水
+router.get(
+  '/credit-transactions',
+  asyncHandler(async (req: AuthRequest, res: Response) => {
+    const result = await adminService.listCreditTransactions({
+      page: req.query.page ? Number(req.query.page) : undefined,
+      pageSize: req.query.pageSize ? Number(req.query.pageSize) : undefined,
+      type: req.query.type as string | undefined,
+      search: req.query.search as string | undefined,
+    })
+    sendPaginated(res, result)
+  }),
+)
+
 // ===== 角色权限配置（服务端强制生效） =====
 // GET /api/admin/role-configs
 router.get(
@@ -469,6 +483,31 @@ router.get(
   }),
 )
 
+// POST /api/admin/provider-configs （创建供应商配置；敏感 key 仍禁止写入数据库）
+router.post(
+  '/provider-configs',
+  asyncHandler(async (req: AuthRequest, res: Response) => {
+    const provider = String(req.body?.provider || '').trim()
+    const displayName = String(req.body?.displayName || provider).trim()
+    if (!provider) throw new ValidationError('provider 不能为空')
+    if (!displayName) throw new ValidationError('显示名称不能为空')
+    const existing = await prisma.aiProviderConfig.findFirst({ where: { provider } })
+    if (existing) throw new ValidationError(`供应商 ${provider} 已存在，请直接编辑现有配置`)
+    const cfg = await prisma.aiProviderConfig.create({
+      data: {
+        provider,
+        displayName,
+        baseUrl: String(req.body?.baseUrl || '').trim(),
+        model: String(req.body?.model || '').trim(),
+        enabled: req.body?.enabled !== false,
+        priority: Number.isFinite(Number(req.body?.priority)) ? Number(req.body.priority) : 0,
+        configJson: req.body?.configJson ?? undefined,
+      },
+    })
+    sendSuccess(res, cfg, 'Provider 配置已创建')
+  }),
+)
+
 // PATCH /api/admin/provider-configs/:id
 router.patch(
   '/provider-configs/:id',
@@ -490,6 +529,17 @@ router.patch(
       data: updatable,
     })
     sendSuccess(res, cfg, 'Provider 配置已更新')
+  }),
+)
+
+// DELETE /api/admin/provider-configs/:id
+router.delete(
+  '/provider-configs/:id',
+  asyncHandler(async (req: AuthRequest, res: Response) => {
+    const existing = await prisma.aiProviderConfig.findUnique({ where: { id: req.params.id } })
+    if (!existing) throw new NotFoundError('Provider 配置不存在')
+    await prisma.aiProviderConfig.delete({ where: { id: req.params.id } })
+    sendSuccess(res, { id: req.params.id }, 'Provider 配置已删除')
   }),
 )
 
@@ -523,6 +573,24 @@ router.post(
   asyncHandler(async (req: AuthRequest, res: Response) => {
     const job = await adminService.retryJob(req.params.id)
     sendSuccess(res, job, '任务已重新入队')
+  }),
+)
+
+// POST /api/admin/generation-jobs/:id/pause
+router.post(
+  '/generation-jobs/:id/pause',
+  asyncHandler(async (req: AuthRequest, res: Response) => {
+    const job = await adminService.pauseJob(req.params.id)
+    sendSuccess(res, job, '任务已暂停')
+  }),
+)
+
+// POST /api/admin/generation-jobs/:id/refund
+router.post(
+  '/generation-jobs/:id/refund',
+  asyncHandler(async (req: AuthRequest, res: Response) => {
+    const job = await adminService.refundJob(req.params.id, req.user!.id)
+    sendSuccess(res, job, '任务已取消，积分已退还')
   }),
 )
 

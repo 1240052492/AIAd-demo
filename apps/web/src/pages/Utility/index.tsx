@@ -40,9 +40,9 @@ export function SupportCenter() {
         <div><h1 className="text-xl font-bold">客服与帮助</h1><p className="text-sm text-muted">常见业务问题与当前服务状态说明。</p></div>
       </header>
       <dl className="divide-y divide-border border-y border-border">
-        <div className="py-5"><dt className="font-medium">为什么无法使用真实生图？</dt><dd className="mt-2 text-sm text-muted">当模型密钥未配置或管理员停用 Provider 时，真实生图会被禁用，本地开发可使用联调预览。</dd></div>
-        <div className="py-5"><dt className="font-medium">生成失败后积分如何处理？</dt><dd className="mt-2 text-sm text-muted">异步任务失败会自动退回冻结积分，可在积分总览查看冻结、消费和退款流水。</dd></div>
-        <div className="py-5"><dt className="font-medium">如何充值或开通会员？</dt><dd className="mt-2 text-sm text-muted">在线支付接口尚未开放，请联系系统管理员手动调整积分或开通套餐。</dd></div>
+        <div className="py-5"><dt className="font-medium">为什么无法使用高清生图？</dt><dd className="mt-2 text-sm text-muted">当图像服务未开通或管理员暂停时，高清生图会暂时不可用。你仍可使用「快速预览」查看示意图，不消耗积分。</dd></div>
+        <div className="py-5"><dt className="font-medium">生成失败后积分如何处理？</dt><dd className="mt-2 text-sm text-muted">任务失败会自动退回已冻结的积分，可在积分总览查看明细。</dd></div>
+        <div className="py-5"><dt className="font-medium">如何充值或开通会员？</dt><dd className="mt-2 text-sm text-muted">在线支付尚未开放，请联系管理员调整积分或开通套餐。</dd></div>
       </dl>
     </div>
   )

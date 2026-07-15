@@ -77,6 +77,7 @@ export default function MainLayout() {
   const logout = useAuthStore((s) => s.logout)
   const balance = useCreditStore((s) => s.balance)
   const isAdmin = getRoleCodes(user).includes('admin')
+  // 后台已独立路由壳；此处仅作兜底（理论上 /admin 不再挂 MainLayout）
   const isAdminRoute = location.pathname.startsWith('/admin')
   const [modal, setModal] = useState<null | 'membership' | 'credits' | 'profile'>(null)
 
@@ -139,9 +140,9 @@ export default function MainLayout() {
             </span>
           </div>
 
-          {/* 中：导航 */}
+          {/* 中：用户端导航（不在此重复堆叠系统管理；管理员仅右侧一个入口） */}
           <nav className="hidden items-center gap-1 md:flex">
-            {[...TOP_NAV, ...(isAdmin ? [{ label: '系统管理', to: '/admin' }] : [])].map((item) => (
+            {TOP_NAV.map((item) => (
               <NavLink
                 key={item.to}
                 to={item.to}
@@ -160,16 +161,17 @@ export default function MainLayout() {
             ))}
           </nav>
 
-          {/* 右：会员 / 积分 / 头像 */}
+          {/* 右：会员 / 积分 / 头像；系统管理仅管理员一个入口 */}
           <div className="flex items-center gap-2">
-            {isAdmin && !isAdminRoute && (
+            {isAdmin && (
               <button
                 type="button"
-                onClick={() => navigate('/admin')}
-                className="hidden items-center gap-1.5 rounded-pill bg-blue/15 px-3 py-1.5 text-sm font-medium text-blue transition-all hover:bg-blue/25 lg:inline-flex"
+                onClick={() => navigate('/admin/overview')}
+                className="inline-flex items-center gap-1.5 rounded-pill bg-blue/15 px-2.5 py-1.5 text-sm font-medium text-blue transition-all hover:bg-blue/25 sm:px-3"
+                title="系统管理"
               >
                 <Settings className="h-4 w-4" />
-                系统管理
+                <span className="hidden sm:inline">系统管理</span>
               </button>
             )}
             <button

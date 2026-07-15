@@ -81,20 +81,68 @@ export function MembershipMgmtPanel() {
 
   return (
     <div className="space-y-5">
-      <div className="flex items-center justify-between">
-        <PageHeader title="会员管理" desc="管理会员套餐：价格（分）、积分、时长、消耗系数与权限" />
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <PageHeader title="会员套餐" desc="配置套餐卡片：价格、到账积分、有效期与上架状态。在线支付未接入前，用户端仅展示联系管理员。" />
         <button className="btn-primary" onClick={() => setCreating(true)}>
           <Plus size={15} /> 新建套餐
         </button>
       </div>
 
-      <DataTable
-        columns={columns}
-        data={plans}
-        loading={isLoading}
-        rowKey={(r) => r.id}
-        emptyText="暂无会员套餐"
-      />
+      {isLoading ? (
+        <div className="flex items-center gap-2 py-10 text-muted">
+          <Loader2 size={16} className="animate-spin" /> 加载中…
+        </div>
+      ) : plans.length === 0 ? (
+        <p className="py-12 text-center text-sm text-muted">暂无会员套餐</p>
+      ) : (
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+          {plans.map((plan) => (
+            <article key={plan.id} className="panel-card flex flex-col gap-3 p-4">
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <h3 className="text-base font-semibold text-text">{plan.name}</h3>
+                  <p className="mt-0.5 text-xs text-muted line-clamp-2">{plan.description || '—'}</p>
+                </div>
+                <Tag tone={(plan.isActive ? 'green' : 'gray') as TagTone}>{plan.isActive ? '上架' : '下架'}</Tag>
+              </div>
+              <div className="flex items-end gap-2">
+                <span className="text-2xl font-bold text-text">¥{toYuan(plan.price)}</span>
+                <span className="mb-1 text-xs text-muted">/{plan.durationDays} 天</span>
+              </div>
+              <dl className="grid grid-cols-2 gap-2 text-xs">
+                <div className="rounded-btn border border-border bg-bg/40 px-2.5 py-2">
+                  <dt className="text-muted">到账积分</dt>
+                  <dd className="mt-0.5 text-sm font-semibold text-amber">{plan.points}</dd>
+                </div>
+                <div className="rounded-btn border border-border bg-bg/40 px-2.5 py-2">
+                  <dt className="text-muted">权益系数</dt>
+                  <dd className="mt-0.5 text-sm font-semibold text-text">×{plan.rate}</dd>
+                </div>
+              </dl>
+              <div className="mt-auto flex gap-2 pt-1">
+                <button className="btn-secondary flex-1 !h-8 text-xs" onClick={() => setEditing(plan)}>
+                  <Pencil size={13} /> 编辑
+                </button>
+                <button
+                  className="btn-secondary !h-8 !px-2.5 text-xs !text-red !border-red/40 hover:!bg-red/10"
+                  disabled={removeMut.isPending}
+                  onClick={() => {
+                    if (confirm(`确认删除套餐「${plan.name}」？`)) removeMut.mutate(plan.id)
+                  }}
+                >
+                  <Trash2 size={13} />
+                </button>
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
+
+      {/* 保留表格视图作辅助（窄屏可滚动） */}
+      <details className="panel-card">
+        <summary className="cursor-pointer px-4 py-3 text-sm text-muted">查看表格视图</summary>
+        <DataTable columns={columns} data={plans} loading={false} rowKey={(r) => r.id} emptyText="暂无会员套餐" />
+      </details>
 
       {creating && (
         <PlanForm

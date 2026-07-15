@@ -40,7 +40,8 @@ export default function LoginPage() {
       const isAdmin =
         user?.role === 'admin' ||
         !!user?.roles?.some((r: any) => (r?.role?.code ?? r) === 'admin')
-      navigate(isAdmin ? '/admin' : '/')
+      // 管理员进入后台 overview（URL 可刷新保持）；普通用户进工作台首页
+      navigate(isAdmin ? '/admin/overview' : '/')
     } catch (err) {
       toast.error(err instanceof Error ? err.message : '登录失败，请检查账号或密码')
     } finally {

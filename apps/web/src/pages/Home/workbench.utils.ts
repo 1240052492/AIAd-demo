@@ -37,5 +37,5 @@ export function requestedVisibleTexts(input: string, explicitInput: string): str
 
 export function createVectorSvg(text: string): string {
   const safeText = text.replace(/[<>&"]/g, '')
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 420"><rect width="1200" height="420" fill="#ffffff"/><text x="600" y="220" text-anchor="middle" font-family="Arial, Microsoft YaHei, sans-serif" font-size="92" font-weight="700" fill="#111827">${safeText}</text><text x="600" y="305" text-anchor="middle" font-family="Arial, Microsoft YaHei, sans-serif" font-size="30" fill="#4b5563">AdCraft vector draft</text></svg>`
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 420"><rect width="1200" height="420" fill="#ffffff"/><text x="600" y="220" text-anchor="middle" font-family="Arial, Microsoft YaHei, sans-serif" font-size="92" font-weight="700" fill="#111827">${safeText}</text><text x="600" y="305" text-anchor="middle" font-family="Arial, Microsoft YaHei, sans-serif" font-size="30" fill="#4b5563">矢量稿预览</text></svg>`
 }

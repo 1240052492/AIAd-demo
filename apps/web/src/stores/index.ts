@@ -37,31 +37,57 @@ export const useAuthStore = create<AuthState>()((set) => ({
  * 成功则回填内存 token 与用户信息；失败（未登录 / cookie 失效）保持未认证态。
  * 注意：此处用原始 fetch 直接调用 /auth/refresh，避免触发 request 封装的
  * 全局 401 跳转（首次无会话访问公开页时不应被强制跳登录）。
+ *
+ * 单飞锁：同一页面生命周期内并发/重复调用复用同一 Promise，避免并行 refresh
+ * 旋转令牌导致偶发会话失效（F5 跳登录）。
  */
-export async function restoreSession(): Promise<void> {
-  try {
-    const base = import.meta.env.VITE_API_BASE_URL || '/api'
-    const res = await fetch(`${base}/auth/refresh`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-    })
-    if (!res.ok) return
-    const json = (await res.json()) as ApiResponse<{ token?: string; accessToken?: string }>
-    const token = json?.data?.token ?? json?.data?.accessToken
-    if (!token) return
-    setAccessToken(token)
-    const me = await authApi.me()
-    if (me?.data) {
-      useAuthStore.getState().setAuth(me.data, token)
-      await syncCreditBalance().catch(() => undefined)
+let restoreSessionPromise: Promise<void> | null = null
+
+export function restoreSession(): Promise<void> {
+  if (restoreSessionPromise) return restoreSessionPromise
+
+  restoreSessionPromise = (async () => {
+    try {
+      const base = import.meta.env.VITE_API_BASE_URL || '/api'
+      // 全程用原始 fetch，避免 request() 在恢复中途遇到 401 时强制跳 /login
+      const res = await fetch(`${base}/auth/refresh`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+      })
+      if (!res.ok) return
+      const json = (await res.json()) as ApiResponse<{ token?: string; accessToken?: string }>
+      const token = json?.data?.token ?? json?.data?.accessToken
+      if (!token) return
+      setAccessToken(token)
+
+      const meRes = await fetch(`${base}/auth/me`, {
+        method: 'GET',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+      })
+      if (!meRes.ok) {
+        // refresh 成功但 me 失败：保留 token 与 cookie，不清理有效会话
+        setAccessToken(token)
+        return
+      }
+      const meJson = (await meRes.json()) as ApiResponse<User>
+      if (meJson?.data) {
+        useAuthStore.getState().setAuth(meJson.data, token)
+        await syncCreditBalance().catch(() => undefined)
+      }
+    } catch {
+      /* 未登录或 refresh 失效：不主动清除 cookie，保持未认证内存态即可 */
+    } finally {
+      // 仅在本轮原始恢复流程结束后标记，并发调用者共享此 Promise
+      useAuthStore.getState().setRestored(true)
     }
-  } catch {
-    /* 未登录或 refresh 失效，保持未认证态 */
-  } finally {
-    // 无论成功失败，都标记恢复完成，避免受保护路由在恢复前抢先渲染并误弹回登录页
-    useAuthStore.getState().setRestored(true)
-  }
+  })()
+
+  return restoreSessionPromise
 }
 
 // 模块加载即尝试恢复会话（SPA 客户端执行，无 SSR）

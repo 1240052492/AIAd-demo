@@ -82,10 +82,14 @@ function escapeSvgText(value: string): string {
   })
 }
 
-async function createMockImage(prompt: string, requiredVisibleTexts: string[]) {
-  const title = requiredVisibleTexts[0] || 'AdCraft AI'
-  const subtitle = prompt.slice(0, 120)
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="800" viewBox="0 0 1200 800"><rect width="1200" height="800" fill="#f8fafc"/><rect x="160" y="160" width="880" height="360" rx="28" fill="#ffffff" stroke="#1f2937" stroke-width="8"/><text x="600" y="340" text-anchor="middle" font-family="Arial, Microsoft YaHei, sans-serif" font-size="76" font-weight="700" fill="#111827">${escapeSvgText(title)}</text><text x="600" y="430" text-anchor="middle" font-family="Arial, Microsoft YaHei, sans-serif" font-size="30" fill="#64748b">AdCraft mock preview</text><text x="600" y="650" text-anchor="middle" font-family="Arial, Microsoft YaHei, sans-serif" font-size="22" fill="#475569">${escapeSvgText(subtitle)}</text></svg>`
+async function createMockImage(_prompt: string, requiredVisibleTexts: string[]) {
+  // 快速预览示意图：面向最终用户；绝不把 prompt 片段印进图内
+  const title = requiredVisibleTexts[0] || '设计预览'
+  const note = '快速方案预览'
+  const extraVisible = requiredVisibleTexts.slice(1).map((t) => t.trim()).filter(Boolean)
+  // 仅有第二条及以后必显文字时才展示；否则用固定中文说明，禁止 fallback 到 prompt
+  const detail = extraVisible.length > 0 ? extraVisible.join(' · ') : '根据当前需求生成的布局示意'
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="800" viewBox="0 0 1200 800"><rect width="1200" height="800" fill="#f8fafc"/><rect x="160" y="160" width="880" height="360" rx="28" fill="#ffffff" stroke="#1f2937" stroke-width="8"/><text x="600" y="340" text-anchor="middle" font-family="Arial, Microsoft YaHei, sans-serif" font-size="76" font-weight="700" fill="#111827">${escapeSvgText(title)}</text><text x="600" y="430" text-anchor="middle" font-family="Arial, Microsoft YaHei, sans-serif" font-size="30" fill="#64748b">${escapeSvgText(note)}</text><text x="600" y="650" text-anchor="middle" font-family="Arial, Microsoft YaHei, sans-serif" font-size="22" fill="#475569">${escapeSvgText(detail)}</text></svg>`
   return sharp(Buffer.from(svg)).png().toBuffer()
 }
 

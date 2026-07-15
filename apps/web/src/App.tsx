@@ -81,12 +81,13 @@ export default function App() {
         {/* 携带图生图编辑器：?seedImg=<url>&polishPrompt=<text> */}
         <Route path="/editor" element={<Protected><EditorPage /></Protected>} />
         <Route path="/editor/:projectId" element={<Protected><EditorPage /></Protected>} />
-        <Route path="/admin/*" element={<AdminOnly><AdminPage /></AdminOnly>} />
         {/* === AGENT_F1_ROUTES === 会员/积分/个人中心 已改为顶栏弹框，见 MainLayout */}
-        {/* === AGENT_F3_ROUTES === */}
-        <Route path="/dashboard" element={<AdminOnly><Navigate to="/admin" replace /></AdminOnly>} />
-        {/* === AGENT_F3_ROUTES === */}
       </Route>
+
+      {/* 管理后台：独立壳，不混入工作台画布导航（页签由 /admin/:tab URL 持久化） */}
+      <Route path="/admin" element={<AdminOnly><Navigate to="/admin/overview" replace /></AdminOnly>} />
+      <Route path="/admin/:tab" element={<AdminOnly><AdminPage /></AdminOnly>} />
+      <Route path="/dashboard" element={<AdminOnly><Navigate to="/admin/overview" replace /></AdminOnly>} />
 
       {/* 兜底 */}
       <Route path="*" element={<Navigate to="/" replace />} />
