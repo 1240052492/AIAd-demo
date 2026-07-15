@@ -1,4 +1,4 @@
-import { useParams, useNavigate, Link } from 'react-router-dom'
+import { useParams, useNavigate, Link, useSearchParams } from 'react-router-dom'
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import {
@@ -12,11 +12,12 @@ import {
   Loader2,
   ArrowLeft,
 } from 'lucide-react'
-import { projectApi, creditApi } from '@/services/api'
+import { projectApi, creditApi, templateApi } from '@/services/api'
 import { BUSINESS_TYPES, type Project, type CreditTransaction, type GenerationJob } from '@/types'
 import { cn } from '@/utils/cn'
 import { Tag, type TagTone } from '@/components/ui/Tag'
 import { Dialog } from '@/components/ui/Dialog'
+import { toast } from 'sonner'
 
 const BUSINESS_LABEL: Record<string, string> = Object.fromEntries(
   BUSINESS_TYPES.map((b) => [b.key, b.label]),
@@ -34,16 +35,17 @@ const PROJECT_STATUS: Record<Project['status'], { label: string; tone: TagTone }
 /** 积分流水类型 -> 文案 */
 const CREDIT_TYPE_LABEL: Record<string, string> = {
   register_bonus: '注册送积分',
+  freeze: '任务积分冻结',
   consume: '生图 / 合成消耗',
   refund: '退款',
+  recharge: '积分充值',
   admin_adjust: '管理员调整',
 }
 
-/** 模板统计（右侧栏，来源于后台配置） */
-const TEMPLATE_STATS = [
-  { key: 'storefront', title: '门头招牌', count: 36, desc: '发光字、底板、灯箱等门头类模板' },
-  { key: 'culture', title: '文化墙', count: 18, desc: '企业文化墙、展板、美陈设计模板' },
-  { key: 'material', title: '物料输出', count: 24, desc: '海报、喷绘、易拉宝等广告物料' },
+const TEMPLATE_GROUPS = [
+  { key: 'storefront_sign', title: '门头招牌', desc: '发光字、底板、灯箱等门头类模板' },
+  { key: 'culture_wall', title: '文化墙', desc: '企业文化墙、展板、美陈设计模板' },
+  { key: 'ad_material', title: '物料输出', desc: '海报、喷绘、易拉宝等广告物料' },
 ]
 
 function fmtTime(iso?: string) {
@@ -62,6 +64,13 @@ function fmtTime(iso?: string) {
   return d.toLocaleDateString('zh-CN')
 }
 
+function formatBytes(size?: number) {
+  if (!size || size < 1) return '—'
+  if (size < 1024) return `${size} B`
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`
+  return `${(size / 1024 / 1024).toFixed(1)} MB`
+}
+
 export default function ProjectsPage() {
   const { id } = useParams()
   if (id) return <ProjectDetail id={id} />
@@ -71,6 +80,13 @@ export default function ProjectsPage() {
 /* ============================ 项目中心（三栏） ============================ */
 function ProjectCenter() {
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const [showCreate, setShowCreate] = useState(searchParams.get('create') === '1')
+
+  const closeCreate = () => {
+    setShowCreate(false)
+    if (searchParams.has('create')) setSearchParams({}, { replace: true })
+  }
 
   const { data: projRes, isLoading: projLoading } = useQuery({
     queryKey: ['projects', 'recent'],
@@ -83,6 +99,11 @@ function ProjectCenter() {
 
   const projects = projRes?.data.items ?? []
   const transactions = creditRes?.data.items ?? []
+  const { data: templateStatsResponse } = useQuery({
+    queryKey: ['templates', 'project-stats'],
+    queryFn: templateApi.stats,
+  })
+  const templateStats = templateStatsResponse?.data ?? {}
 
   const [showAllTx, setShowAllTx] = useState(false)
   const { data: allTxRes, isLoading: allTxLoading } = useQuery({
@@ -106,7 +127,7 @@ function ProjectCenter() {
         <section className="panel-card flex flex-col lg:col-span-5">
           <header className="flex items-center justify-between border-b border-border px-4 py-3">
             <h2 className="text-sm font-semibold text-text">最近客户项目</h2>
-            <button className="btn-primary h-8 !px-3 text-xs" onClick={() => navigate('/projects/new')}>
+            <button className="btn-primary h-8 !px-3 text-xs" onClick={() => setShowCreate(true)}>
               <Plus size={14} /> 新建项目
             </button>
           </header>
@@ -212,11 +233,12 @@ function ProjectCenter() {
             <h2 className="text-sm font-semibold text-text">广告流程模板</h2>
           </header>
           <div className="grid grid-cols-1 gap-3 p-3 sm:grid-cols-3 lg:grid-cols-1">
-            {TEMPLATE_STATS.map((s) => (
+            {TEMPLATE_GROUPS.map((s) => (
               <div key={s.key} className="rounded-btn border border-border bg-panel-2/50 p-3">
                 <p className="text-xs text-muted">{s.title}</p>
                 <p className="mt-1 text-2xl font-bold text-text">
-                  {s.count} <span className="text-sm font-normal text-muted">个模板</span>
+                  {templateStats[s.key] ?? 0}{' '}
+                  <span className="text-sm font-normal text-muted">个模板</span>
                 </p>
                 <p className="mt-1 text-xs leading-relaxed text-muted/80">{s.desc}</p>
               </div>
@@ -268,6 +290,7 @@ function ProjectCenter() {
           )}
         </div>
       </Dialog>
+      <NewProjectDialog open={showCreate} onClose={closeCreate} onCreated={(id) => navigate(`/projects/${id}`)} />
     </div>
   )
 }
@@ -289,54 +312,19 @@ const JOB_STATUS_TONE: Record<string, TagTone> = {
   canceled: 'gray',
 }
 
-/** 详情页示例数据：关联素材与生成任务历史（后端暂无对应接口，演示用） */
-const MOCK_ASSETS = [
-  { id: 'a1', type: 'upload_environment', name: '门店环境照.jpg', size: '2.4 MB' },
-  { id: 'a2', type: 'generated_design', name: '门头设计_v1.png', size: '1.1 MB' },
-  { id: 'a3', type: 'composited_preview', name: '合成预览.png', size: '880 KB' },
-]
-const MOCK_JOBS: GenerationJob[] = [
-  {
-    id: 'j1',
-    provider: 'gpt-image-2',
-    model: 'gpt-image-2',
-    jobType: 'image_generation',
-    status: 'succeeded',
-    creditsFrozen: 12,
-    creditsConsumed: 12,
-    createdAt: new Date(Date.now() - 3600_000).toISOString(),
-    finishedAt: new Date(Date.now() - 3500_000).toISOString(),
-  },
-  {
-    id: 'j2',
-    provider: 'anthropic',
-    model: 'claude-3-5-sonnet',
-    jobType: 'brief',
-    status: 'succeeded',
-    creditsFrozen: 2,
-    creditsConsumed: 2,
-    createdAt: new Date(Date.now() - 7200_000).toISOString(),
-    finishedAt: new Date(Date.now() - 7150_000).toISOString(),
-  },
-  {
-    id: 'j3',
-    provider: 'gpt-image-2',
-    model: 'gpt-image-2',
-    jobType: 'composition',
-    status: 'failed',
-    creditsFrozen: 8,
-    creditsConsumed: 0,
-    createdAt: new Date(Date.now() - 1800_000).toISOString(),
-  },
-]
-
 function ProjectDetail({ id }: { id: string }) {
   const navigate = useNavigate()
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError } = useQuery({
     queryKey: ['project', id],
     queryFn: () => projectApi.detail(id),
   })
   const project = data?.data
+  const { data: jobsResponse, isLoading: jobsLoading } = useQuery({
+    queryKey: ['project-jobs', id],
+    queryFn: () => projectApi.getJobs(id),
+  })
+  const assets = project?.assets ?? []
+  const jobs = jobsResponse?.data ?? []
 
   return (
     <div className="mx-auto max-w-[1100px] px-6 py-6">
@@ -347,7 +335,9 @@ function ProjectDetail({ id }: { id: string }) {
         <ArrowLeft size={15} /> 返回项目中心
       </button>
 
-      {isLoading || !project ? (
+      {isError ? (
+        <div className="panel-card py-20 text-center text-sm text-muted">项目不存在或无权访问</div>
+      ) : isLoading || !project ? (
         <div className="panel-card flex items-center justify-center gap-2 py-20 text-muted">
           <Loader2 size={18} className="animate-spin" /> 加载项目详情…
         </div>
@@ -399,18 +389,20 @@ function ProjectDetail({ id }: { id: string }) {
                 <h2 className="text-sm font-semibold text-text">关联素材</h2>
               </header>
               <div className="divide-y divide-border">
-                {MOCK_ASSETS.map((a) => (
+                {assets.length === 0 ? (
+                  <p className="px-4 py-10 text-center text-sm text-muted">暂无关联素材</p>
+                ) : assets.map((a) => (
                   <div key={a.id} className="flex items-center justify-between px-4 py-3">
                     <div className="flex items-center gap-3">
                       <span className="flex h-9 w-9 items-center justify-center rounded-btn bg-panel-2 text-muted">
                         <FileText size={16} />
                       </span>
                       <div>
-                        <p className="text-sm font-medium text-text">{a.name}</p>
+                        <p className="text-sm font-medium text-text">{a.storageKey?.split('/').pop() || `${a.type} 素材`}</p>
                         <p className="text-xs text-muted">{a.type}</p>
                       </div>
                     </div>
-                    <span className="text-xs text-muted">{a.size}</span>
+                    <span className="text-xs text-muted">{formatBytes(a.size)}</span>
                   </div>
                 ))}
               </div>
@@ -423,7 +415,11 @@ function ProjectDetail({ id }: { id: string }) {
                 <h2 className="text-sm font-semibold text-text">生成任务历史</h2>
               </header>
               <div className="divide-y divide-border">
-                {MOCK_JOBS.map((j) => (
+                {jobsLoading ? (
+                  <p className="px-4 py-10 text-center text-sm text-muted">任务加载中…</p>
+                ) : jobs.length === 0 ? (
+                  <p className="px-4 py-10 text-center text-sm text-muted">暂无生成任务</p>
+                ) : jobs.map((j: GenerationJob) => (
                   <div key={j.id} className="flex items-center justify-between px-4 py-3">
                     <div>
                       <p className="text-sm font-medium text-text">
@@ -454,5 +450,75 @@ function BriefItem({ label, value }: { label: string; value?: string }) {
       <p className="text-xs text-muted">{label}</p>
       <p className="mt-0.5 truncate text-sm text-text">{value ?? '—'}</p>
     </div>
+  )
+}
+
+function NewProjectDialog({
+  open,
+  onClose,
+  onCreated,
+}: {
+  open: boolean
+  onClose: () => void
+  onCreated: (id: string) => void
+}) {
+  const [title, setTitle] = useState('')
+  const [businessType, setBusinessType] = useState<(typeof BUSINESS_TYPES)[number]['key']>('storefront_sign')
+  const [submitting, setSubmitting] = useState(false)
+
+  async function submit() {
+    if (!title.trim()) return
+    setSubmitting(true)
+    try {
+      const response = await projectApi.create({ title: title.trim(), businessType })
+      setTitle('')
+      onClose()
+      onCreated(response.data.id)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : '项目创建失败')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(next) => !next && onClose()}
+      title="新建项目"
+      description="创建后可上传环境素材并开始广告方案生成"
+      className="max-w-lg"
+    >
+      <div className="space-y-4">
+        <label className="block">
+          <span className="mb-1.5 block text-xs font-semibold text-muted">项目名称</span>
+          <input
+            value={title}
+            onChange={(event) => setTitle(event.target.value)}
+            placeholder="例如：春季门店招牌升级"
+            className="h-10 w-full rounded-card border border-border bg-bg px-3 text-sm outline-none focus:border-blue/70"
+          />
+        </label>
+        <label className="block">
+          <span className="mb-1.5 block text-xs font-semibold text-muted">业务类型</span>
+          <select
+            value={businessType}
+            onChange={(event) => setBusinessType(event.target.value as typeof businessType)}
+            className="h-10 w-full rounded-card border border-border bg-bg px-3 text-sm outline-none"
+          >
+            {BUSINESS_TYPES.map((item) => (
+              <option key={item.key} value={item.key}>{item.label}</option>
+            ))}
+          </select>
+        </label>
+        <div className="flex justify-end gap-2">
+          <button type="button" onClick={onClose} className="btn-secondary">取消</button>
+          <button type="button" onClick={submit} disabled={submitting || !title.trim()} className="btn-primary">
+            {submitting ? <Loader2 size={15} className="animate-spin" /> : <Plus size={15} />}
+            创建项目
+          </button>
+        </div>
+      </div>
+    </Dialog>
   )
 }

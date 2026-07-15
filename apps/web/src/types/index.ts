@@ -24,6 +24,7 @@ export interface Project {
   briefJson?: BriefData
   createdAt: string
   updatedAt: string
+  assets?: Asset[]
 }
 
 /** Brief 数据结构 */
@@ -51,6 +52,9 @@ export interface Asset {
   width?: number
   height?: number
   metadataJson?: Record<string, unknown>
+  size?: number
+  storageKey?: string
+  createdAt?: string
 }
 
 export type AssetType =
@@ -76,6 +80,7 @@ export interface GenerationJob {
   startedAt?: string
   finishedAt?: string
   createdAt: string
+  errorMessage?: string
 }
 
 export type JobType = 'brief' | 'prompt' | 'image_generation' | 'composition' | 'export'

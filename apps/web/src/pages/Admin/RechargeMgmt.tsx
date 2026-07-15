@@ -52,7 +52,7 @@ export function RechargeMgmtPanel() {
           <span className="text-muted">—</span>
         ),
     },
-    { key: 'amount', header: '金额', cell: (r) => <span className="text-text">¥{r.amount}</span> },
+    { key: 'amount', header: '金额', cell: (r) => <span className="text-text">¥{(r.amount / 100).toFixed(2)}</span> },
     { key: 'points', header: '到账积分', cell: (r) => <span className="text-text">{r.points}</span> },
     {
       key: 'rate',
@@ -81,7 +81,7 @@ export function RechargeMgmtPanel() {
 
   return (
     <div className="space-y-5">
-      <PageHeader title="积分管理" desc="查看用户充值订单与积分到账记录" />
+      <PageHeader title="积分管理" desc="查看预留充值订单与积分处理记录" />
 
       <div className="flex items-start gap-2 rounded-btn border border-blue/30 bg-blue/8 px-4 py-3 text-sm">
         <Info size={16} className="mt-0.5 shrink-0 text-blue" />

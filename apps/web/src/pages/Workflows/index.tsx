@@ -12,8 +12,14 @@ import {
   CheckCircle2,
   Users,
   type LucideIcon,
+  Play,
+  Loader2,
 } from 'lucide-react'
 import { cn } from '@/utils/cn'
+import { useEffect, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import { toast } from 'sonner'
+import { aiApi, capabilityApi, projectApi } from '@/services/api'
 
 type WorkflowStep = {
   id: number
@@ -195,6 +201,34 @@ function StepCardMobile({ step, last }: { step: WorkflowStep; last: boolean }) {
 }
 
 export default function WorkflowLibrary() {
+  const [projectId, setProjectId] = useState('')
+  const [userInput, setUserInput] = useState('')
+  const [running, setRunning] = useState(false)
+  const projects = useQuery({
+    queryKey: ['projects', 'workflow'],
+    queryFn: () => projectApi.list({ page: 1, pageSize: 50 }),
+  })
+  const capabilities = useQuery({ queryKey: ['capabilities'], queryFn: capabilityApi.get })
+  const items = projects.data?.data.items ?? []
+  const textAvailable = Boolean(capabilities.data?.data.textGeneration)
+
+  useEffect(() => {
+    if (!projectId && items[0]) setProjectId(items[0].id)
+  }, [items, projectId])
+
+  async function runWorkflow() {
+    if (!projectId) return
+    setRunning(true)
+    try {
+      await aiApi.runWorkflow(projectId, userInput)
+      toast.success('工作流执行完成，可在项目任务历史中查看结果')
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : '工作流执行失败')
+    } finally {
+      setRunning(false)
+    }
+  }
+
   return (
     <div className="mx-auto max-w-[1200px] px-6 py-6">
       {/* 顶部标题 */}
@@ -211,6 +245,23 @@ export default function WorkflowLibrary() {
           </div>
         </div>
       </header>
+
+      <section className="mb-8 grid gap-3 border-y border-border py-5 md:grid-cols-[minmax(220px,0.8fr)_minmax(320px,1.4fr)_auto] md:items-end">
+        <label>
+          <span className="mb-1.5 block text-xs font-semibold text-muted">执行项目</span>
+          <select value={projectId} onChange={(event) => setProjectId(event.target.value)} className="h-10 w-full rounded-card border border-border bg-bg px-3 text-sm">
+            {items.length === 0 ? <option value="">暂无项目</option> : items.map((project) => <option key={project.id} value={project.id}>{project.title}</option>)}
+          </select>
+        </label>
+        <label>
+          <span className="mb-1.5 block text-xs font-semibold text-muted">补充要求</span>
+          <input value={userInput} onChange={(event) => setUserInput(event.target.value)} placeholder="可选：补充预算、交期或审核重点" className="h-10 w-full rounded-card border border-border bg-bg px-3 text-sm" />
+        </label>
+        <button type="button" onClick={runWorkflow} disabled={running || !projectId || !textAvailable} className="btn-primary h-10">
+          {running ? <Loader2 size={15} className="animate-spin" /> : <Play size={15} />}
+          {textAvailable ? '运行工作流' : '文本模型未配置'}
+        </button>
+      </section>
 
       {/* 桌面端：横向步骤条 */}
       <section className="hidden md:flex md:items-start md:gap-2">

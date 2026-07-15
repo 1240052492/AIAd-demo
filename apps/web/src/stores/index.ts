@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import type { User, ApiResponse } from '@/types'
-import { authApi, setAccessToken } from '@/services/api'
+import { authApi, creditApi, setAccessToken } from '@/services/api'
 
 interface AuthState {
   user: User | null
@@ -10,7 +10,7 @@ interface AuthState {
   restored: boolean
   setAuth: (user: User, token: string) => void
   setRestored: (v: boolean) => void
-  logout: () => void
+  logout: () => Promise<void>
 }
 
 // 注意：access token 仅存于内存（由 @/services/api 的 setAccessToken 统一管理），
@@ -25,9 +25,8 @@ export const useAuthStore = create<AuthState>()((set) => ({
     set({ user, token })
   },
   setRestored: (v) => set({ restored: v }),
-  logout: () => {
-    // 先通知服务端清除 httpOnly refresh cookie，再清理内存态
-    void authApi.logout().catch(() => undefined)
+  logout: async () => {
+    await authApi.logout().catch(() => undefined)
     setAccessToken(null)
     set({ user: null, token: null })
   },
@@ -55,6 +54,7 @@ export async function restoreSession(): Promise<void> {
     const me = await authApi.me()
     if (me?.data) {
       useAuthStore.getState().setAuth(me.data, token)
+      await syncCreditBalance().catch(() => undefined)
     }
   } catch {
     /* 未登录或 refresh 失效，保持未认证态 */
@@ -72,6 +72,7 @@ interface CreditState {
   frozenBalance: number
   setBalance: (balance: number, frozenBalance?: number) => void
   deduct: (amount: number) => void
+  reset: () => void
 }
 
 export const useCreditStore = create<CreditState>()((set) => ({
@@ -80,4 +81,10 @@ export const useCreditStore = create<CreditState>()((set) => ({
   setBalance: (balance, frozenBalance = 0) => set({ balance, frozenBalance }),
   deduct: (amount) =>
     set((s) => ({ balance: Math.max(0, s.balance - amount) })),
+  reset: () => set({ balance: 0, frozenBalance: 0 }),
 }))
+
+export async function syncCreditBalance(): Promise<void> {
+  const response = await creditApi.balance()
+  useCreditStore.getState().setBalance(response.data.balance, response.data.frozenBalance)
+}

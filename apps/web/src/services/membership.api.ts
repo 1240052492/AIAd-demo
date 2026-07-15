@@ -71,7 +71,7 @@ export const membershipApi = {
   /** GET /api/credits/rules/public */
   getRules: () => api.get<Record<string, number>>('/credits/rules/public'),
 
-  /** POST /api/credits/recharge { amount }（amount 单位：分，演示环境立即到账） */
+  /** 预留充值接口（amount 单位：分；当前服务固定返回 403，不会到账） */
   recharge: (amount: number) =>
     api.post<{ order: RechargeOrder; balance: CreditAccount }>('/credits/recharge', { amount }),
 }

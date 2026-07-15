@@ -124,11 +124,12 @@ router.post('/register', async (req, res, next) => {
     })
 
     const roles = ['user']
-    const { accessToken } = signAccessToken(user.id, roles)
+    const { accessToken, expiresIn } = signAccessToken(user.id, roles)
+    const { refreshToken } = signRefreshToken(user.id, roles)
+    setRefreshCookie(res, refreshToken)
 
     const { passwordHash: _ph, ...safeUser } = user
-    // 保持既有响应结构（含 token 字段），同时提供契约字段 accessToken
-    return ok(res, { token: accessToken, accessToken, user: safeUser }, '注册成功')
+    return ok(res, { token: accessToken, accessToken, expiresIn, user: safeUser }, '注册成功')
   } catch (err) {
     // 并发注册同一手机号/邮箱：唯一约束冲突（P2002）应返回 400 而非 500
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {

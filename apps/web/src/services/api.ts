@@ -121,15 +121,30 @@ export const api = {
   delete: <T>(path: string) => request<T>(path, { method: 'DELETE' }),
 
   /** 上传文件（同样带 credentials: 'include' 与内存 token） */
-  upload: <T>(path: string, file: File, fieldName = 'file') => {
+  upload: async <T>(path: string, file: File, fieldName = 'file') => {
     const formData = new FormData()
     formData.append(fieldName, file)
-    return fetch(`${BASE_URL}${path}`, {
-      method: 'POST',
-      credentials: 'include',
-      headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
-      body: formData,
-    }).then((r) => r.json() as Promise<ApiResponse<T>>)
+    const send = (token: string | null) =>
+      fetch(`${BASE_URL}${path}`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        body: formData,
+      })
+    let response = await send(accessToken)
+    if (response.status === 401) {
+      const refreshed = await refreshAccessToken()
+      if (refreshed) response = await send(refreshed)
+    }
+    if (response.status === 401) {
+      redirectToLogin()
+      throw new Error('未登录或登录已过期')
+    }
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ message: '上传失败' }))
+      throw new Error((error as { message?: string }).message || `HTTP ${response.status}`)
+    }
+    return response.json() as Promise<ApiResponse<T>>
   },
 }
 
@@ -164,7 +179,19 @@ export const authApi = {
 export function connectProgressWs(jobId: string): WebSocket {
   const proto = typeof location !== 'undefined' && location.protocol === 'https:' ? 'wss' : 'ws'
   const host = typeof location !== 'undefined' ? location.host : '127.0.0.1:4177'
-  return new WebSocket(`${proto}://${host}/ws?jobId=${encodeURIComponent(jobId)}`)
+  const query = new URLSearchParams({ jobId })
+  return new WebSocket(`${proto}://${host}/ws?${query.toString()}`)
+}
+
+export interface ProviderCapabilities {
+  mock: boolean
+  textGeneration: boolean
+  imageGeneration: boolean
+  composition: boolean
+}
+
+export const capabilityApi = {
+  get: () => api.get<ProviderCapabilities>('/capabilities'),
 }
 
 // ============================================
@@ -181,7 +208,9 @@ export const projectApi = {
   uploadAsset: (projectId: string, file: File) =>
     api.upload<import('@/types').Asset>(`/projects/${projectId}/assets`, file),
   getAssets: (projectId: string) =>
-    api.get<import('@/types').Asset[]>(`/projects/${projectId}/assets`),
+    api.get<PaginatedResponse<import('@/types').Asset>>(`/projects/${projectId}/assets`),
+  getJobs: (projectId: string) =>
+    api.get<import('@/types').GenerationJob[]>(`/projects/${projectId}/jobs`),
   export: (projectId: string, format: 'png' | 'svg' | 'pdf') =>
     api.post<{ url: string }>(`/projects/${projectId}/export`, { format }),
 }
@@ -222,8 +251,8 @@ export const aiApi = {
     api.post<BriefResult>('/ai/brief', data),
   prompt: (data: { brief: import('@/types').BriefData; stylePreference?: string; mock?: boolean }) =>
     api.post<{ prompts: string[] }>('/ai/prompt', data),
-  runWorkflow: (projectId: string, workflowId: string) =>
-    api.post(`/ai/workflows/run`, { projectId, workflowId }),
+  runWorkflow: (projectId: string, userInput: string) =>
+    api.post<{ projectId: string; steps: unknown[] }>(`/ai/workflows/run`, { projectId, userInput }),
 }
 
 // ============================================
@@ -292,6 +321,7 @@ export const creditApi = {
 // 模板 API
 // ============================================
 export const templateApi = {
+  stats: () => api.get<Record<string, number>>('/templates/stats'),
   list: (params?: { category?: string; businessType?: string; page?: number; pageSize?: number }) =>
     api.get<PaginatedResponse<import('@/types').Template>>(
       `/templates?${new URLSearchParams(params as Record<string, string>).toString()}`

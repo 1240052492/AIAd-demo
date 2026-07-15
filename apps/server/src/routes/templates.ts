@@ -6,6 +6,13 @@ import { templateService } from '../services/template.service'
 
 const router = Router()
 
+router.get(
+  '/stats',
+  asyncHandler(async (_req: Request, res: Response) => {
+    sendSuccess(res, await templateService.publicStats())
+  }),
+)
+
 // GET /api/templates - 公开模板列表（允许未登录浏览，带 token 也行）
 router.get(
   '/',

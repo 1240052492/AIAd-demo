@@ -5,6 +5,7 @@ export type AccountType = 'personal' | 'enterprise'
 interface AccountSwitchState {
   accountType: AccountType
   setAccountType: (t: AccountType) => void
+  reset: () => void
 }
 
 /**
@@ -14,4 +15,5 @@ interface AccountSwitchState {
 export const useAccountSwitch = create<AccountSwitchState>()((set) => ({
   accountType: 'personal',
   setAccountType: (accountType) => set({ accountType }),
+  reset: () => set({ accountType: 'personal' }),
 }))

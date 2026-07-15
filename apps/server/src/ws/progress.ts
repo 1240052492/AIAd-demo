@@ -1,6 +1,9 @@
 import { Server, IncomingMessage } from 'http'
 import { WebSocketServer, WebSocket } from 'ws'
 import { EventEmitter } from 'events'
+import jwt from 'jsonwebtoken'
+import { env, prisma } from '../config'
+import { isBlacklisted } from '../utils/token-blacklist'
 
 /**
  * 实时进度 WebSocket 服务。
@@ -34,32 +37,65 @@ export interface ProgressPayload {
 
 /** 单个订阅者的状态 */
 interface Subscription {
-  jobId?: string
+  jobId: string
+}
+
+function readCookie(header: string | undefined, name: string): string | undefined {
+  if (!header) return undefined
+  const prefix = `${name}=`
+  const value = header
+    .split(';')
+    .map((part) => part.trim())
+    .find((part) => part.startsWith(prefix))
+  return value ? decodeURIComponent(value.slice(prefix.length)) : undefined
+}
+
+function rejectConnection(ws: WebSocket, message: string): void {
+  try {
+    ws.send(JSON.stringify({ type: 'error', message }))
+  } finally {
+    ws.close()
+  }
 }
 
 export function setupProgressWs(server: Server): void {
   const wss = new WebSocketServer({ server, path: '/ws' })
 
-  wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
+  wss.on('connection', async (ws: WebSocket, req: IncomingMessage) => {
     const url = new URL(req.url || '', 'http://localhost')
-    const sub: Subscription = {
-      jobId: url.searchParams.get('jobId') || undefined,
+    const jobId = url.searchParams.get('jobId')?.trim()
+    const accessCredential = url.searchParams.get('token') || readCookie(req.headers.cookie, 'access_token')
+    const refreshCredential = readCookie(req.headers.cookie, 'refresh_token')
+    const token = accessCredential || refreshCredential
+    if (!jobId || !token) return rejectConnection(ws, '缺少任务或身份凭证')
+
+    let userId: string | undefined
+    try {
+      const payload = jwt.verify(token, accessCredential ? env.jwtSecret : env.refreshTokenSecret) as Record<string, unknown>
+      userId = (payload.userId || payload.sub || payload.id) as string | undefined
+      const jti = payload.jti as string | undefined
+      if (!userId || (jti && (await isBlacklisted(jti)))) {
+        return rejectConnection(ws, '身份凭证已失效')
+      }
+    } catch {
+      return rejectConnection(ws, '身份凭证已失效')
     }
 
-    // —— 鉴权最小化（MVP） ——
-    // 接受 ?token= 或 Cookie 中的凭据；缺失也允许连接（仅订阅，不做强鉴权）。
-    // 生产环境应在下方 TODO 处校验 token / 会话，并将订阅的 jobId 与当前用户
-    // 的归属关系做绑定，避免未授权订阅任意 jobId 的进度。
-    const token = url.searchParams.get('token') || undefined
-    if (token) {
-      // TODO(security): 校验 token，绑定 userId 与 jobId 的归属关系。
+    const [user, job] = await Promise.all([
+      prisma.user.findUnique({ where: { id: userId }, select: { status: true } }),
+      prisma.generationJob.findFirst({ where: { id: jobId, userId }, select: { id: true } }),
+    ])
+    if (!user || user.status !== 'active' || !job) {
+      return rejectConnection(ws, '任务不存在或无权订阅')
     }
+
+    const sub: Subscription = { jobId }
 
     const handler = (p: ProgressPayload) => {
       if (!p || typeof p !== 'object') return
       if (!p.jobId) return
       // 若客户端订阅了特定 jobId，只转发匹配的任务
-      if (sub.jobId && p.jobId !== sub.jobId) return
+      if (p.jobId !== sub.jobId) return
       try {
         ws.send(JSON.stringify({ type: 'progress', ...p }))
       } catch {

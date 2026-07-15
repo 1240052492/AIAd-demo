@@ -5,6 +5,7 @@ import { sendSuccess, sendPaginated } from '../utils/response'
 import { requireAuth, AuthRequest } from '../middleware/auth'
 import { ValidationError } from '../utils/errors'
 import { projectService } from '../services/project.service'
+import { nsfwCheckUpload } from '../middleware/content-review'
 
 const router = Router()
 
@@ -77,6 +78,7 @@ router.post(
   '/:id/assets',
   requireAuth,
   upload.single('file'),
+  nsfwCheckUpload(),
   asyncHandler(async (req: AuthRequest, res: Response) => {
     if (!req.file) throw new ValidationError('未接收到上传文件')
     const type = (req.body.type as string) || 'upload_environment'
@@ -100,6 +102,15 @@ router.get(
       pageSize: req.query.pageSize as any,
     })
     sendSuccess(res, assets)
+  }),
+)
+
+// GET /api/projects/:id/jobs - 当前项目的真实生成任务历史
+router.get(
+  '/:id/jobs',
+  requireAuth,
+  asyncHandler(async (req: AuthRequest, res: Response) => {
+    sendSuccess(res, await projectService.getJobs(req.params.id, req.user!.id))
   }),
 )
 

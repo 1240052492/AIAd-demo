@@ -1,5 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
+import { useQueryClient } from '@tanstack/react-query'
 import { Toaster } from 'sonner'
 import {
   Home,
@@ -14,7 +15,9 @@ import {
 } from 'lucide-react'
 import { cn } from '@/utils/cn'
 import { useAuthStore } from '@/stores'
-import { useCreditStore } from '@/stores'
+import { syncCreditBalance, useCreditStore } from '@/stores'
+import { useGenerationStore } from '@/stores/generation'
+import { useAccountSwitch } from '@/stores/accountSwitch'
 import { Dialog } from '@/components/ui/Dialog'
 import { MembershipModal } from '@/pages/Membership'
 import { PointsDetail } from '@/pages/Membership/PointsDetail'
@@ -68,6 +71,7 @@ function getRoleCodes(user: ReturnType<typeof useAuthStore.getState>['user']): s
 export default function MainLayout() {
   const location = useLocation()
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
   const user = useAuthStore((s) => s.user)
   const token = useAuthStore((s) => s.token)
   const logout = useAuthStore((s) => s.logout)
@@ -75,6 +79,14 @@ export default function MainLayout() {
   const isAdmin = getRoleCodes(user).includes('admin')
   const isAdminRoute = location.pathname.startsWith('/admin')
   const [modal, setModal] = useState<null | 'membership' | 'credits' | 'profile'>(null)
+
+  useEffect(() => {
+    if (!token || !user) {
+      useCreditStore.getState().reset()
+      return
+    }
+    void syncCreditBalance().catch(() => undefined)
+  }, [token, user?.id])
 
   // 判断 Rail 是否高亮：根据当前路径前缀匹配
   const isRailActive = (to: string) =>
@@ -129,7 +141,7 @@ export default function MainLayout() {
 
           {/* 中：导航 */}
           <nav className="hidden items-center gap-1 md:flex">
-            {[...TOP_NAV, ...(isAdmin ? [{ label: '数据总览', to: '/dashboard' }] : [])].map((item) => (
+            {[...TOP_NAV, ...(isAdmin ? [{ label: '系统管理', to: '/admin' }] : [])].map((item) => (
               <NavLink
                 key={item.to}
                 to={item.to}
@@ -163,18 +175,20 @@ export default function MainLayout() {
             <button
               type="button"
               onClick={() => setModal('membership')}
-              className="hidden items-center gap-1.5 rounded-pill px-3 py-1.5 text-sm text-muted transition-all hover:bg-white/5 hover:text-text lg:inline-flex"
+              className="inline-flex items-center gap-1.5 rounded-pill p-2 text-sm text-muted transition-all hover:bg-white/5 hover:text-text lg:px-3 lg:py-1.5"
+              title="会员中心"
             >
               <Crown className="h-4 w-4 text-amber" />
-              会员中心
+              <span className="hidden lg:inline">会员中心</span>
             </button>
             <button
               type="button"
               onClick={() => setModal('credits')}
-              className="hidden items-center gap-1.5 rounded-pill px-3 py-1.5 text-sm text-muted transition-all hover:bg-white/5 hover:text-text lg:inline-flex"
+              className="inline-flex items-center gap-1.5 rounded-pill p-2 text-sm text-muted transition-all hover:bg-white/5 hover:text-text lg:px-3 lg:py-1.5"
+              title="积分总览"
             >
               <Gift className="h-4 w-4 text-amber" />
-              积分总览
+              <span className="hidden lg:inline">积分总览</span>
             </button>
 
             <div className="credit-badge font-semibold">
@@ -194,8 +208,13 @@ export default function MainLayout() {
               {token && (
                 <button
                   type="button"
-                  onClick={() => {
-                    logout()
+                  onClick={async () => {
+                    await logout()
+                    useCreditStore.getState().reset()
+                    useGenerationStore.getState().reset()
+                    useAccountSwitch.getState().reset()
+                    queryClient.clear()
+                    setModal(null)
                     navigate('/login')
                   }}
                   title="退出登录"

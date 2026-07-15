@@ -22,6 +22,16 @@ export interface CreateTemplateInput {
 }
 
 export class TemplateService {
+  /** 公开模板按业务类型聚合，避免前端只统计当前分页。 */
+  async publicStats(): Promise<Record<string, number>> {
+    const groups = await prisma.template.groupBy({
+      by: ['businessType'],
+      where: { isPublic: true },
+      _count: { _all: true },
+    })
+    return Object.fromEntries(groups.map((group) => [group.businessType, group._count._all]))
+  }
+
   /** 获取模板列表（公开模板 + 分类筛选 + 分页） */
   async list(params: ListTemplateParams): Promise<PaginatedResponse<any>> {
     const { page, pageSize, skip, take } = parsePagination(params as any)

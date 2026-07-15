@@ -6,15 +6,13 @@ import HomePage from '@/pages/Home'
 import EditorPage from '@/pages/Editor'
 import ProjectsPage from '@/pages/Projects'
 import AdminPage from '@/pages/Admin'
-// === AGENT_F3_ROUTES ===
-import DashboardPage from '@/pages/Dashboard'
-// === AGENT_F3_ROUTES ===
 import { TemplateLibrary } from '@/components/projects/TemplateLibrary'
 import PromptLibrary from '@/pages/Prompts'
 import WorkflowLibrary from '@/pages/Workflows'
 import AccountPage from '@/pages/Account'
 import LoginPage from '@/pages/Login'
 import RegisterPage from '@/pages/Register'
+import { ExportCenter, SupportCenter } from '@/pages/Utility'
 // === AGENT_F1_ROUTES ===
 import { useAuthStore } from '@/stores'
 
@@ -71,19 +69,22 @@ export default function App() {
       {/* 主应用（带侧边栏布局） */}
       <Route element={<MainLayout />}>
         <Route path="/" element={<HomePage />} />
-        <Route path="/projects" element={<ProjectsPage />} />
-        <Route path="/projects/:id" element={<ProjectsPage />} />
+        <Route path="/projects" element={<Protected><ProjectsPage /></Protected>} />
+        <Route path="/projects/new" element={<Protected><Navigate to="/projects?create=1" replace /></Protected>} />
+        <Route path="/projects/:id" element={<Protected><ProjectsPage /></Protected>} />
         <Route path="/templates" element={<div className="mx-auto max-w-[1200px] px-6 py-6"><TemplateLibrary /></div>} />
         <Route path="/prompts" element={<PromptLibrary />} />
-        <Route path="/workflows" element={<WorkflowLibrary />} />
+        <Route path="/workflows" element={<Protected><WorkflowLibrary /></Protected>} />
         <Route path="/account" element={<Protected><AccountPage /></Protected>} />
+        <Route path="/export" element={<Protected><ExportCenter /></Protected>} />
+        <Route path="/support" element={<SupportCenter />} />
         {/* 携带图生图编辑器：?seedImg=<url>&polishPrompt=<text> */}
         <Route path="/editor" element={<Protected><EditorPage /></Protected>} />
         <Route path="/editor/:projectId" element={<Protected><EditorPage /></Protected>} />
         <Route path="/admin/*" element={<AdminOnly><AdminPage /></AdminOnly>} />
         {/* === AGENT_F1_ROUTES === 会员/积分/个人中心 已改为顶栏弹框，见 MainLayout */}
         {/* === AGENT_F3_ROUTES === */}
-        <Route path="/dashboard" element={<AdminOnly><DashboardPage /></AdminOnly>} />
+        <Route path="/dashboard" element={<AdminOnly><Navigate to="/admin" replace /></AdminOnly>} />
         {/* === AGENT_F3_ROUTES === */}
       </Route>
 

@@ -202,7 +202,7 @@ async function main() {
 
   const admin = await prisma.user.upsert({
     where: { email: adminEmail },
-    update: {},
+    update: process.env.ADMIN_PASSWORD ? { passwordHash: hashedPassword } : {},
     create: {
       email: adminEmail,
       nickname: '系统管理员',
@@ -217,7 +217,7 @@ async function main() {
   // 确保管理员积分账户与角色存在（upsert 不覆盖关联，需补建）
   await prisma.creditAccount.upsert({
     where: { userId: admin.id },
-    update: { balance: 9999 },
+    update: {},
     create: { userId: admin.id, balance: 9999 },
   })
   const adminHasRole = await prisma.userRole.findFirst({

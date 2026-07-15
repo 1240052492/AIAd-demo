@@ -35,7 +35,11 @@ router.post('/', requirePermission('canExport'), async (req: Request, res: Respo
 
     frozen = await creditRuleService.getCost('exportSvg')
     if (frozen > 0) {
-      await creditService.freeze(userId, frozen, { reason: '导出 SVG 矢量图', relatedType: 'export' })
+      await creditService.freeze(userId, frozen, {
+        reason: '导出 SVG 矢量图',
+        relatedType: 'export',
+        relatedId: jobId || projectId,
+      })
     }
 
     const saved = await FileStorage.save(Buffer.from(svg, 'utf8'), 'vector.svg', 'exports')

@@ -3,8 +3,10 @@ import { Link, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { Mail, Lock, User, Loader2 } from 'lucide-react'
 import { cn } from '@/utils/cn'
-import { useAuthStore } from '@/stores'
+import { syncCreditBalance, useAuthStore, useCreditStore } from '@/stores'
 import { authApi } from '@/services/api'
+import { useGenerationStore } from '@/stores/generation'
+import { useAccountSwitch } from '@/stores/accountSwitch'
 
 export default function RegisterPage() {
   const navigate = useNavigate()
@@ -47,7 +49,11 @@ export default function RegisterPage() {
           }
       const res = await authApi.register(payload)
       const { token, user } = res.data
+      useCreditStore.getState().reset()
+      useGenerationStore.getState().reset()
+      useAccountSwitch.getState().reset()
       setAuth(user, token)
+      await syncCreditBalance().catch(() => undefined)
       toast.success('注册成功，已自动登录')
       navigate('/')
     } catch (err) {

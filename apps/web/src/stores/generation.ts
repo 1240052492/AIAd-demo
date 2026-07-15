@@ -5,9 +5,11 @@ import { homeImageJobApi } from '@/services/home.api'
 import { createVectorSvg, extractStoreName } from '@/pages/Home/workbench.utils'
 import { BUSINESS_TYPES } from '@/pages/Home/workbench.constants'
 import { toast } from 'sonner'
+import { syncCreditBalance } from '@/stores'
 
 export type ActiveTab = 'composed' | 'original' | 'vector'
 export type JobWithResponse = GenerationJob & {
+  errorMessage?: string
   results?: Array<Asset & { assetId?: string }>
   responseJson?: {
     textValidation?: TextValidationRecord
@@ -149,6 +151,10 @@ export const useGenerationStore = create<GenerationState>()((set, get) => {
     })
     const finalJob = (await imageJobApi.poll(response.data.jobId, 1600, mock ? 15_000 : 720_000)) as JobWithResponse
     set({ originalJob: finalJob })
+    await syncCreditBalance().catch(() => undefined)
+    if (finalJob.status !== 'succeeded') {
+      throw new Error(finalJob.errorMessage || '图片生成失败')
+    }
     return finalJob
   }
 
@@ -168,7 +174,12 @@ export const useGenerationStore = create<GenerationState>()((set, get) => {
       requiredVisibleTexts: visibleTexts,
     })
     const finalJob = (await imageJobApi.poll(response.data.jobId, 1600, 240_000)) as JobWithResponse
-    set({ composedJob: finalJob, activeTab: 'composed' })
+    set({ composedJob: finalJob })
+    await syncCreditBalance().catch(() => undefined)
+    if (finalJob.status !== 'succeeded') {
+      throw new Error(finalJob.errorMessage || '环境合成失败')
+    }
+    set({ activeTab: 'composed' })
     return finalJob
   }
 
@@ -179,6 +190,36 @@ export const useGenerationStore = create<GenerationState>()((set, get) => {
       svg: createVectorSvg(get().storeName),
     })
     set({ vectorAsset: response.data.asset })
+    await syncCreditBalance().catch(() => undefined)
+  }
+
+  async function createOptionalOutputs(
+    project: string,
+    original: JobWithResponse,
+    environment: Asset | null | undefined,
+    visibleTexts: string[],
+  ): Promise<boolean> {
+    let partial = false
+    const designAsset = firstAsset(original)
+    if (environment && designAsset) {
+      try {
+        await submitComposition(project, environment, designAsset, visibleTexts)
+      } catch (err) {
+        partial = true
+        set({ activeTab: 'original' })
+        toast.warning(`广告原图已生成，但环境合成失败：${err instanceof Error ? err.message : '未知错误'}`)
+      }
+    } else {
+      set({ activeTab: 'original' })
+    }
+    try {
+      await createVector(project, original)
+    } catch (err) {
+      partial = true
+      await syncCreditBalance().catch(() => undefined)
+      toast.warning(`位图结果已保留，但 SVG 导出失败：${err instanceof Error ? err.message : '未知错误'}`)
+    }
+    return partial
   }
 
   return {
@@ -265,17 +306,14 @@ export const useGenerationStore = create<GenerationState>()((set, get) => {
           model: config.model,
           visibleTexts: config.visibleTexts,
         })
-        const designAsset = firstAsset(original)
-        if (uploadedEnv && designAsset) {
-          await submitComposition(nextProjectId, uploadedEnv, designAsset, config.visibleTexts)
-        } else {
-          set({ activeTab: 'original' })
-        }
-        await createVector(nextProjectId, original)
-        toast.success('工作台方案已生成')
+        const partial = await createOptionalOutputs(nextProjectId, original, uploadedEnv, config.visibleTexts)
+        toast.success(partial ? '广告原图已生成，部分附加输出未完成' : '工作台方案已生成')
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : '生成失败')
+        const message = err instanceof Error ? err.message : '生成失败'
+        set({ error: message })
+        toast.error(message)
       } finally {
+        await syncCreditBalance().catch(() => undefined)
         set({ busy: false })
       }
     },
@@ -289,17 +327,19 @@ export const useGenerationStore = create<GenerationState>()((set, get) => {
           model: get().model,
           visibleTexts: config.visibleTexts,
         })
-        const designAsset = firstAsset(original)
-        if (config.environmentAsset && designAsset) {
-          await submitComposition(config.projectId, config.environmentAsset, designAsset, config.visibleTexts)
-        } else {
-          set({ activeTab: 'original' })
-        }
-        await createVector(config.projectId, original)
-        toast.success('已按当前提示词重新生成')
+        const partial = await createOptionalOutputs(
+          config.projectId,
+          original,
+          config.environmentAsset,
+          config.visibleTexts,
+        )
+        toast.success(partial ? '原图已重新生成，部分附加输出未完成' : '已按当前提示词重新生成')
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : '重新生成失败')
+        const message = err instanceof Error ? err.message : '重新生成失败'
+        set({ error: message })
+        toast.error(message)
       } finally {
+        await syncCreditBalance().catch(() => undefined)
         set({ busy: false })
       }
     },

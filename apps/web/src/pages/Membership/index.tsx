@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useQuery } from '@tanstack/react-query'
 import {
   Crown,
   Coins,
@@ -10,10 +10,8 @@ import {
   Zap,
   ShieldCheck,
 } from 'lucide-react'
-import { toast } from 'sonner'
 import { cn } from '@/utils/cn'
 import { membershipApi, type MembershipPlan } from '@/services/membership.api'
-import { useCreditStore } from '@/stores'
 import { formatYuan, formatPoints } from './PointsDetail'
 import { Dialog } from '@/components/ui/Dialog'
 
@@ -21,12 +19,8 @@ type TabKey = 'plans' | 'recharge'
 
 function PlanCard({
   plan,
-  onPurchase,
-  purchasing,
 }: {
   plan: MembershipPlan
-  onPurchase: (plan: MembershipPlan) => void
-  purchasing: boolean
 }) {
   const isCredits = /credit|point|积分/i.test(plan.code + plan.name)
   return (
@@ -61,10 +55,9 @@ function PlanCard({
 
       <button
         disabled
-        onClick={() => onPurchase(plan)}
         className="btn-primary mt-1 flex items-center justify-center gap-2 opacity-60"
       >
-        {purchasing ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />}
+        <Check size={15} />
         {plan.isActive ? '联系管理员开通' : '暂不可售'}
       </button>
     </div>
@@ -74,8 +67,6 @@ function PlanCard({
 export function MembershipModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [tab, setTab] = useState<TabKey>('plans')
   const [rechargeAmount, setRechargeAmount] = useState<number>(2900)
-  const queryClient = useQueryClient()
-  const setBalance = useCreditStore((s) => s.setBalance)
 
   const plansQ = useQuery({
     queryKey: ['membership', 'plans'],
@@ -87,41 +78,6 @@ export function MembershipModal({ open, onClose }: { open: boolean; onClose: () 
     queryKey: ['membership', 'mine'],
     queryFn: async () => (await membershipApi.getMine()).data,
     enabled: open,
-  })
-
-  const refreshBalance = async () => {
-    try {
-      const r = await membershipApi.getBalance()
-      setBalance(r.data.balance, r.data.frozenBalance)
-    } catch {
-      /* ignore */
-    }
-  }
-
-  const purchaseMut = useMutation({
-    mutationFn: (plan: MembershipPlan) => membershipApi.purchasePlan(plan.code),
-    onSuccess: async () => {
-      toast.success('开通成功，积分已到账')
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['membership', 'mine'] }),
-        queryClient.invalidateQueries({ queryKey: ['membership', 'plans'] }),
-        refreshBalance(),
-      ])
-    },
-    onError: (e: Error) => toast.error(e.message || '开通失败'),
-  })
-
-  const rechargeMut = useMutation({
-    mutationFn: (amount: number) => membershipApi.recharge(amount),
-    onSuccess: async () => {
-      toast.success('充值成功，积分已到账（演示）')
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['membership', 'balance'] }),
-        queryClient.invalidateQueries({ queryKey: ['membership', 'transactions'] }),
-        refreshBalance(),
-      ])
-    },
-    onError: (e: Error) => toast.error(e.message || '充值失败'),
   })
 
   const active = (mineQ.data ?? []).filter((m) => m.status === 'active' || new Date(m.expiresAt) > new Date())
@@ -213,12 +169,7 @@ export function MembershipModal({ open, onClose }: { open: boolean; onClose: () 
             ) : (
               <div className="grid gap-3 sm:grid-cols-2">
                 {(memberPlans.length ? memberPlans : allPlans).map((plan) => (
-                  <PlanCard
-                    key={plan.id}
-                    plan={plan}
-                    purchasing={purchaseMut.isPending && purchaseMut.variables?.code === plan.code}
-                    onPurchase={(p) => purchaseMut.mutate(p)}
-                  />
+                  <PlanCard key={plan.id} plan={plan} />
                 ))}
               </div>
             )}
@@ -231,12 +182,7 @@ export function MembershipModal({ open, onClose }: { open: boolean; onClose: () 
             {creditPlans.length > 0 && (
               <div className="grid gap-3 sm:grid-cols-2">
                 {creditPlans.map((plan) => (
-                  <PlanCard
-                    key={plan.id}
-                    plan={plan}
-                    purchasing={purchaseMut.isPending && purchaseMut.variables?.code === plan.code}
-                    onPurchase={(p) => purchaseMut.mutate(p)}
-                  />
+                  <PlanCard key={plan.id} plan={plan} />
                 ))}
               </div>
             )}
@@ -272,7 +218,7 @@ export function MembershipModal({ open, onClose }: { open: boolean; onClose: () 
                   onClick={() => undefined}
                   className="btn-primary flex items-center gap-2 opacity-60"
                 >
-                  {rechargeMut.isPending ? <Loader2 size={15} className="animate-spin" /> : <Coins size={15} />}
+                  <Coins size={15} />
                   联系管理员充值
                 </button>
               </div>

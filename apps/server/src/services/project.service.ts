@@ -176,6 +176,16 @@ export class ProjectService {
     return toPaginated(items, total, page, pageSize)
   }
 
+  /** 获取项目任务历史（仅当前用户，最近 100 条） */
+  async getJobs(projectId: string, userId: string) {
+    await this.assertOwner(projectId, userId)
+    return prisma.generationJob.findMany({
+      where: { projectId, userId },
+      orderBy: { createdAt: 'desc' },
+      take: 100,
+    })
+  }
+
   /** 保存画布版本（校验归属；限制画布体积防 JSON DoS） */
   async saveVersion(
     projectId: string,

@@ -28,12 +28,8 @@ export async function reviewImage(_buffer: Buffer): Promise<ReviewResult> {
     return { safe: true }
   }
 
-  // TODO(security): 在此调用真实 NSFW 分类器并映射结果，例如：
-  //   const labels = await classify(_buffer)
-  //   const bad = labels.find((l) => l.confidence >= THRESHOLD)
-  //   if (bad) return { safe: false, reason: bad.name }
-  // 当前为占位实现：启用 NSFW_ENABLED 后务必替换为真实逻辑。
-  return { safe: true }
+  // 启用审核却没有配置分类器时必须 fail-closed，避免运维误以为审核已生效。
+  return { safe: false, reason: '内容安全审核已启用，但分类服务尚未配置' }
 }
 
 /**

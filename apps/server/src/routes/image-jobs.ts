@@ -7,6 +7,8 @@ import { creditRuleService } from '../services/credit-rule.service'
 import { textValidationService, TextValidationRecord } from '../services/ai/text-validation.service'
 import { textCorrectionService } from '../services/ai/text-correction.service'
 import { saveBuffer } from '../utils/storage'
+import { allowMockRequest, requireImageProvider } from '../services/capability.service'
+import { enqueueCreditCompensation } from '../workers/credit-compensation'
 
 const router = Router()
 
@@ -121,8 +123,7 @@ router.post('/', requirePermission('canGenerate'), async (req: Request, res: Res
     const imageCreditCost = await creditRuleService.getCost('imageGeneration')
     // 生产护栏：仅当显式设置 ALLOW_MOCK=true 时才允许 mock 短路；
     // 否则即使请求体携带 mock:true 也强制走真实生图路径（生产永不可被 mock）。
-    const allowMock = process.env.ALLOW_MOCK === 'true'
-    const mock = req.body?.mock === true && allowMock
+    const mock = allowMockRequest(req.body?.mock)
     const creditCost = mock ? 0 : n * imageCreditCost
     // 生成消耗按积分规则标准扣减；代理 0.7 仅用于充值付款金额，不影响消费积分。
     const requiredVisibleTexts = normalizeRequiredVisibleTexts(req.body?.requiredVisibleTexts)
@@ -166,21 +167,9 @@ router.post('/', requirePermission('canGenerate'), async (req: Request, res: Res
       return res.json({ code: 0, message: 'ok', data: { jobId: genJob.id, status: 'succeeded' } })
     }
 
-    // 直接冻结积分：freeze 在数据库事务内（行锁）校验余额，
-    // 避免「先 getBalance 再 freeze」之间的 TOCTOU 竞态导致超额冻结。
-    // 余额不足时 creditService 抛 InsufficientBalanceError（AppError, 400），全局错误处理直接返回 400（F7）。
-    if (creditCost > 0) {
-      try {
-        await creditService.freeze(userId, creditCost, {
-          reason: '提交生图任务',
-          relatedType: 'job',
-        })
-      } catch (err) {
-        return next(err)
-      }
-    }
+    await requireImageProvider()
 
-    // 创建 GenerationJob 记录
+    // 先创建任务，确保冻结流水从一开始就能关联到真实 jobId。
     const genJob = await prisma.generationJob.create({
       data: {
         userId,
@@ -195,18 +184,49 @@ router.post('/', requirePermission('canGenerate'), async (req: Request, res: Res
       },
     })
 
-    // 加入 BullMQ 队列
-    await imageQueue.add('generate', {
-      jobId: genJob.id,
-      userId,
-      projectId: projectId || null,
-      prompt: safePrompt,
-      count: n,
-      model: genJob.model,
-      ratio,
-      size,
-      creditsFrozen: creditCost,
-    })
+    try {
+      if (creditCost > 0) {
+        await creditService.freeze(userId, creditCost, {
+          reason: '提交生图任务',
+          relatedType: 'job',
+          relatedId: genJob.id,
+        })
+      }
+
+      await imageQueue.add('generate', {
+        jobId: genJob.id,
+        userId,
+        projectId: projectId || null,
+        prompt: safePrompt,
+        count: n,
+        model: genJob.model,
+        ratio,
+        size,
+        creditsFrozen: creditCost,
+      })
+    } catch (err) {
+      await prisma.generationJob
+        .update({
+          where: { id: genJob.id },
+          data: {
+            status: 'failed',
+            finishedAt: new Date(),
+            errorMessage: err instanceof Error ? err.message : String(err),
+          },
+        })
+        .catch(() => undefined)
+      if (creditCost > 0) {
+        await enqueueCreditCompensation({
+          type: 'refund',
+          userId,
+          credits: creditCost,
+          reason: '生图任务入队失败退回积分',
+          relatedType: 'job',
+          relatedId: genJob.id,
+        })
+      }
+      return next(err)
+    }
 
     return res.json({ code: 0, message: 'ok', data: { jobId: genJob.id, status: 'queued' } })
   } catch (err) {

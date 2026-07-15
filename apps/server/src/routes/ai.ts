@@ -4,6 +4,8 @@ import { AnthropicService, type GenerateBriefResult } from '../services/ai/anthr
 import { PromptService } from '../services/ai/prompt.service'
 import { WorkflowEngine } from '../services/ai/workflow.engine'
 import { creditService } from '../services/credit.service'
+import { allowMockRequest, requireTextProvider } from '../services/capability.service'
+import { prisma } from '../config'
 
 const router = Router()
 
@@ -73,7 +75,7 @@ router.post('/brief', requirePermission('canGenerate'), async (req: Request, res
     // 当请求体 mock === true 时跳过 AI 网关与积分冻结，直接返回结构化示例 Brief，
     // 使首页「生成方案」在无网关时也能跑通（与 image-jobs 的 mock 分支对齐）。
     // 生产护栏：仅当显式设置 ALLOW_MOCK=true 才允许；否则忽略 mock 标志走真实网关。
-    if (req.body?.mock === true && process.env.ALLOW_MOCK === 'true') {
+    if (allowMockRequest(req.body?.mock)) {
       const bt = (businessType || '').trim()
       const mat = typeof constraints?.material === 'string' ? constraints.material : ''
       const sty = typeof constraints?.style === 'string' ? constraints.style : ''
@@ -101,6 +103,8 @@ router.post('/brief', requirePermission('canGenerate'), async (req: Request, res
     }
 
     const userId = req.user!.id
+
+    await requireTextProvider()
 
     // 直接冻结：freeze 在事务内（行锁）原子校验余额，避免「先查后冻」竞态。
     // 余额不足时 creditService 抛 InsufficientBalanceError（AppError, 400），全局错误处理直接返回 400，
@@ -161,7 +165,7 @@ router.post('/prompt', requirePermission('canGenerate'), async (req: Request, re
     // ── 离线演示模式（mock）────────────────────────────────────────────
     // 当请求体 mock === true 时跳过 AI 网关与积分冻结，直接返回多风格提示词示例。
     // 生产护栏：仅当显式设置 ALLOW_MOCK=true 才允许；否则忽略 mock 标志走真实网关。
-    if (req.body?.mock === true && process.env.ALLOW_MOCK === 'true') {
+    if (allowMockRequest(req.body?.mock)) {
       const b = (brief ?? {}) as Record<string, unknown>
       const base = `a high-quality advertising visual for ${
         (b.storeName as string) || 'a local store'
@@ -179,6 +183,8 @@ router.post('/prompt', requirePermission('canGenerate'), async (req: Request, re
         },
       })
     }
+
+    await requireTextProvider()
 
     try {
       await creditService.freeze(userId, 1, { reason: '优化生图提示词', relatedType: 'ai_prompt' })
@@ -225,6 +231,15 @@ router.post('/workflows/run', requirePermission('canGenerate'), async (req: Requ
       safeUserInput = v
     }
     const userId = req.user!.id
+
+    const project = await prisma.project.findFirst({
+      where: { id: projectId.trim(), userId },
+      select: { id: true },
+    })
+    if (!project) {
+      return res.status(404).json({ code: 404, message: '项目不存在或无权访问', data: null })
+    }
+    await requireTextProvider()
 
     // 文本步骤积分（4 步）
     const TEXT_STEPS_CREDIT = 4

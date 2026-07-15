@@ -19,7 +19,7 @@ import {
   Wand2,
 } from 'lucide-react'
 import { cn } from '@/utils/cn'
-import { useAuthStore } from '@/stores'
+import { useAuthStore, useCreditStore } from '@/stores'
 import {
   aiApi,
   compositionJobApi,
@@ -27,6 +27,8 @@ import {
   imageJobApi,
   projectApi,
   vectorAssetApi,
+  capabilityApi,
+  type ProviderCapabilities,
 } from '@/services/api'
 import type { TextCorrection, TextValidationCheck, TextValidationRecord } from '@/types'
 import {
@@ -136,6 +138,7 @@ function SelectWithOther({
 export default function HomePage() {
   const navigate = useNavigate()
   const token = useAuthStore((state) => state.token)
+  const balance = useCreditStore((state) => state.balance)
 
   const [customerText, setCustomerText] = useState(DEFAULT_NEED)
   const [requiredTextInput, setRequiredTextInput] = useState('')
@@ -156,6 +159,7 @@ export default function HomePage() {
   const [validating, setValidating] = useState(false)
   const [correcting, setCorrecting] = useState(false)
   const [creditRules, setCreditRules] = useState<Record<string, number>>({})
+  const [capabilities, setCapabilities] = useState<ProviderCapabilities | null>(null)
 
   // 提示词库「使用此提示词」→ 填入客户需求输入框（解耦桥，见 @/stores/promptSeed）
   const seedPrompt = usePromptSeed((s) => s.seedPrompt)
@@ -168,6 +172,22 @@ export default function HomePage() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seedPrompt])
+
+  useEffect(() => {
+    void creditApi
+      .rules()
+      .then((response) => setCreditRules(response.data))
+      .catch(() => undefined)
+    void capabilityApi
+      .get()
+      .then((response) => {
+        setCapabilities(response.data)
+        if ((!response.data.textGeneration || !response.data.imageGeneration) && response.data.mock) {
+          setRunMode('mock')
+        }
+      })
+      .catch(() => setCapabilities({ mock: false, textGeneration: false, imageGeneration: false, composition: true }))
+  }, [])
 
   // 生图进度与结果来自全局 store：切换路由组件卸载重建后依然保留，
   // 生图轮询在 store action 中执行（脱离组件生命周期），因此「生成中切页再切回」不会中断。
@@ -225,6 +245,9 @@ export default function HomePage() {
     const svg = creditRules.exportSvg ?? 1
     return brief + image + composition + svg
   }, [count, creditRules, environmentAsset, environmentFile])
+  const liveAvailable = Boolean(capabilities?.textGeneration && capabilities?.imageGeneration)
+  const mockAvailable = Boolean(capabilities?.mock)
+  const insufficientBalance = runMode === 'live' && balance < estimate
 
   async function handleGenerate() {
     if (!customerText.trim()) {
@@ -234,6 +257,18 @@ export default function HomePage() {
     if (!token) {
       toast.error('请先登录后再生成')
       navigate('/login')
+      return
+    }
+    if (runMode === 'live' && !liveAvailable) {
+      toast.error('真实生成服务尚未配置或已停用')
+      return
+    }
+    if (runMode === 'mock' && !mockAvailable) {
+      toast.error('联调预览在当前环境不可用')
+      return
+    }
+    if (insufficientBalance) {
+      toast.error(`积分不足：当前 ${balance}，预计需要 ${estimate}`)
       return
     }
 
@@ -254,6 +289,14 @@ export default function HomePage() {
   }
 
   async function handleRegenerateWithPrompt() {
+    if (runMode === 'live' && (!liveAvailable || insufficientBalance)) {
+      toast.error(!liveAvailable ? '真实生成服务尚未配置或已停用' : `积分不足：当前 ${balance}，预计需要 ${estimate}`)
+      return
+    }
+    if (runMode === 'mock' && !mockAvailable) {
+      toast.error('联调预览在当前环境不可用')
+      return
+    }
     if (!projectId || !promptText.trim()) {
       await handleGenerate()
       return
@@ -392,7 +435,7 @@ export default function HomePage() {
               <button
                 type="button"
                 onClick={() => setRunMode('mock')}
-                disabled={busy}
+                disabled={busy || !mockAvailable}
                 className={cn('btn-secondary h-8', runMode === 'mock' && 'border-green/50 bg-green/15 text-text')}
               >
                 联调预览
@@ -400,13 +443,17 @@ export default function HomePage() {
               <button
                 type="button"
                 onClick={() => setRunMode('live')}
-                disabled={busy}
+                disabled={busy || !liveAvailable}
                 className={cn('btn-secondary h-8', runMode === 'live' && 'border-amber/50 bg-amber/15 text-amber')}
               >
                 真实生图
               </button>
               <span className="text-xs text-muted">
-                {runMode === 'mock' ? '生成本地预览图，不消耗 image2。' : `预计消耗约 ${estimate} 积分，以后端结算为准。`}
+                {runMode === 'mock'
+                  ? '生成本地预览图，不消耗 image2。'
+                  : liveAvailable
+                    ? `预计消耗约 ${estimate} 积分，当前可用 ${balance}。`
+                    : '真实生成服务尚未配置或已由管理员停用。'}
               </span>
             </div>
 
@@ -467,7 +514,13 @@ export default function HomePage() {
                     : '当前使用默认模型 gpt-image-2'}
                 </span>
               </label>
-              <button type="button" onClick={handleGenerate} disabled={busy} className="btn-primary mt-auto gap-2">
+              <button
+                type="button"
+                onClick={handleGenerate}
+                disabled={busy || !capabilities || (runMode === 'live' ? !liveAvailable || insufficientBalance : !mockAvailable)}
+                className="btn-primary mt-auto gap-2"
+                title={insufficientBalance ? `积分不足，当前 ${balance}，预计需要 ${estimate}` : undefined}
+              >
                 {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}
                 生成方案
               </button>
@@ -525,7 +578,12 @@ export default function HomePage() {
                   <RotateCcw className="h-4 w-4" />
                   重置为 AI 原版
                 </button>
-                <button type="button" onClick={handleRegenerateWithPrompt} disabled={busy} className="btn-primary gap-2">
+                <button
+                  type="button"
+                  onClick={handleRegenerateWithPrompt}
+                  disabled={busy || (runMode === 'live' ? !liveAvailable || insufficientBalance : !mockAvailable)}
+                  className="btn-primary gap-2"
+                >
                   <Send className="h-4 w-4" />
                   用当前提示词生图
                 </button>

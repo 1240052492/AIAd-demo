@@ -21,6 +21,7 @@ import { templateRoutes } from './routes/templates'
 import { AppError } from './utils/errors'
 import { prisma, redisConnection, env } from './config'
 import { loginLimiter, apiLimiter } from './middleware/rate-limit'
+import { getProviderCapabilities } from './services/capability.service'
 
 dotenv.config()
 
@@ -90,6 +91,15 @@ app.get('/api/health', async (_req, res) => {
     res.status(200).json({ status: 'ok', db: true, redis: true })
   } else {
     res.status(503).json({ status: 'degraded', db, redis })
+  }
+})
+
+// 仅暴露布尔能力，不返回密钥、地址或模型配置。前端据此禁用不可执行的真实生成入口。
+app.get('/api/capabilities', async (_req, res, next) => {
+  try {
+    res.json({ code: 0, message: 'ok', data: await getProviderCapabilities() })
+  } catch (err) {
+    next(err)
   }
 })
 

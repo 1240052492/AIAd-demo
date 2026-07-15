@@ -108,7 +108,11 @@ export function rateLimit(opts: RateLimitOptions = {}): RequestHandler {
 }
 
 /** 登录接口：15 分钟内最多 10 次（防爆破） */
-export const loginLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 10, bucket: 'login' })
+export const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: process.env.NODE_ENV === 'production' ? 10 : 100,
+  bucket: 'login',
+})
 
 /**
  * 通用 API：60 秒内最多 300 次。

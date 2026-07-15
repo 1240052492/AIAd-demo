@@ -3,6 +3,7 @@ import { requirePermission } from '../middleware/auth'
 import { prisma, compositionQueue, env } from '../config'
 import { creditService } from '../services/credit.service'
 import { creditRuleService } from '../services/credit-rule.service'
+import { enqueueCreditCompensation } from '../workers/credit-compensation'
 
 const router = Router()
 
@@ -92,17 +93,6 @@ router.post('/', requirePermission('canCompose'), async (req: Request, res: Resp
     }
 
     const creditCost = await creditRuleService.getCost('composition')
-    if (creditCost > 0) {
-      try {
-        await creditService.freeze(userId, creditCost, {
-          reason: '提交环境合成任务',
-          relatedType: 'job',
-        })
-      } catch (err) {
-        return next(err)
-      }
-    }
-
     const position = parsePosition(req.body.position)
     const outputFormat = req.body.outputFormat === 'jpeg' ? 'jpeg' : 'png'
     const requiredVisibleTexts = normalizeRequiredVisibleTexts(req.body.requiredVisibleTexts)
@@ -125,16 +115,48 @@ router.post('/', requirePermission('canCompose'), async (req: Request, res: Resp
       },
     })
 
-    await compositionQueue.add('compose', {
-      jobId: genJob.id,
-      userId,
-      projectId: project.id,
-      environmentAssetId: environmentAsset.id,
-      designAssetId: designAsset.id,
-      position,
-      outputFormat,
-      creditsFrozen: creditCost,
-    })
+    try {
+      if (creditCost > 0) {
+        await creditService.freeze(userId, creditCost, {
+          reason: '提交环境合成任务',
+          relatedType: 'job',
+          relatedId: genJob.id,
+        })
+      }
+
+      await compositionQueue.add('compose', {
+        jobId: genJob.id,
+        userId,
+        projectId: project.id,
+        environmentAssetId: environmentAsset.id,
+        designAssetId: designAsset.id,
+        position,
+        outputFormat,
+        creditsFrozen: creditCost,
+      })
+    } catch (err) {
+      await prisma.generationJob
+        .update({
+          where: { id: genJob.id },
+          data: {
+            status: 'failed',
+            finishedAt: new Date(),
+            errorMessage: err instanceof Error ? err.message : String(err),
+          },
+        })
+        .catch(() => undefined)
+      if (creditCost > 0) {
+        await enqueueCreditCompensation({
+          type: 'refund',
+          userId,
+          credits: creditCost,
+          reason: '环境合成任务入队失败退回积分',
+          relatedType: 'job',
+          relatedId: genJob.id,
+        })
+      }
+      return next(err)
+    }
 
     return res.json({ code: 0, message: 'ok', data: { jobId: genJob.id, status: 'queued' } })
   } catch (err) {
