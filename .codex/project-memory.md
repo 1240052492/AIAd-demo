@@ -113,3 +113,21 @@
 - 验证方式：配置测试、后端 TypeScript 检查、`git diff --check` 通过；重启 server 与 image worker；在 `OPENAI_IMAGE_MODE=async` 下真实点击“生成方案”，Brief 成功、图片完成、矢量稿导出，耗时约 4 分钟。
 - 关键结论：网关仍不支持 `background/async`，代码会回退到同步生图；10 分钟提交超时使 3–4 分钟的同步回退可以完成。前端本地轮询上限约 12 分钟，当前足够覆盖该流程。
 - 遗留风险或下一步：如果网关未来提供真正的异步任务接口，可再优化为直接使用任务 ID；当前不需要把模式切回 `sync`，但 server/worker 修改 `.env` 后必须重启。
+
+### 2026-07-16 02:25  提交最新代码到 GitHub
+
+- 用户目标：把当前 `master` 本地分支的最新改动提交并推送到 GitHub。
+- 实际修改：将工作区全部相关改动（含此前多次修复与新增测试/文档）一次性提交为 `3faa43c`，并推送到远程。
+  - 提交内容（19 文件，+2007/-40）：`anthropic.service.ts` 新增 `normalizeOpenAICompatibleBaseUrl` 自动补 `/v1`；`config/index.ts` 新增 `openaiImageSubmitTimeoutMs`（默认 600000ms）；`image.worker.ts` 生图提交超时改为可配置；`Home/index.tsx` + 新 `run-mode.ts` 抽取 mock 自动选择逻辑；更新 `.env.example`/`.env.production.example`；新增单测（base-url/submit-timeout/config 与 web 的 auth-session/home-run-mode）；提交 `AGENTS.md`、`HANDOVER.md`、`docs/benchmark/`、`apps/web/tests/`、`.codex/project-memory.md`。
+  - 提交前做了敏感词扫描，确认无真实 API Key/密码进入版本库。
+- 涉及文件：上述全部；推送目标为用户指定的**新建远程 `origin/master`**（`git push -u origin master`，远程此前无 `master` 分支）。
+- 验证方式：`git status --short` 在提交后为空（无剩余未提交）；`git ls-remote --heads origin master` 返回 `3faa43c…refs/heads/master`；`git branch -vv` 显示 `master` 已 tracking `origin/master`。
+- 遗留风险或下一步：推送后 `origin/master` 曾比 `origin/main` 多 1 个提交；当前远程 `main` 与 `master` 均已同步到 `3faa43c`。`docs/benchmark/` 与 `.codex/` 已入库，属于项目资产。
+
+### 2026-07-16  GitHub CLI 登录与仓库权限验证
+
+- 用户目标：确认 GitHub 登录是否成功，并确保后续可以直接提交和推送代码。
+- 实际修改：未修改业务代码；验证 `gh` 已登录账号 `1240052492`，Git 协议为 HTTPS，目标仓库权限为 `ADMIN`。
+- 涉及文件：仅更新 `.codex/project-memory.md` 任务记录。
+- 验证方式：`gh auth status` 登录成功；`gh api user` 返回当前账号；`gh repo view 1240052492/AIAd-demo` 返回 `ADMIN`；`git ls-remote origin HEAD` 成功。
+- 遗留风险或下一步：当前 GitHub 凭据已保存在系统 keyring；凭据失效或被撤销时需要重新执行 `gh auth login -h github.com`。当前远程 `main` 与 `master` 均指向 `3faa43c`。
