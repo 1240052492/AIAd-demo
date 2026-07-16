@@ -53,6 +53,7 @@ import {
   type JobWithResponse,
 } from '@/stores/generation'
 import { usePromptSeed } from '@/stores/promptSeed'
+import { shouldAutoSelectMockMode } from './run-mode'
 
 type RunMode = 'mock' | 'live'
 
@@ -140,7 +141,7 @@ export default function HomePage() {
       .get()
       .then((response) => {
         setCapabilities(response.data)
-        if ((!response.data.textGeneration || !response.data.imageGeneration) && response.data.mock) {
+        if (shouldAutoSelectMockMode(response.data)) {
           setRunMode('mock')
         }
       })

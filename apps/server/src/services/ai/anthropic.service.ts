@@ -1,6 +1,12 @@
 import OpenAI from 'openai'
 import { env } from '../../config'
 
+export function normalizeOpenAICompatibleBaseUrl(value: string): string | undefined {
+  const trimmed = value.trim().replace(/\/+$/, '')
+  if (!trimmed) return undefined
+  return /\/v1$/i.test(trimmed) ? trimmed : `${trimmed}/v1`
+}
+
 /**
  * 业务类型 -> 中文标签映射（用于向 AI 注入更明确的语境）
  */
@@ -124,7 +130,7 @@ export class AnthropicService {
 
   private ensureClient(): OpenAI {
     const apiKey = env.anthropicApiKey
-    const baseURL = env.anthropicBaseUrl || undefined
+    const baseURL = normalizeOpenAICompatibleBaseUrl(env.anthropicBaseUrl)
     if (!apiKey) {
       throw new Error('未配置 AI 文本 Provider 的 API Key（环境变量 ANTHROPIC_API_KEY）')
     }

@@ -112,6 +112,7 @@ export const env = {
   openaiImageModel: process.env.OPENAI_IMAGE_MODEL || 'gpt-image-2',
   // 生图模式：async（异步提交 + 轮询，默认）/ sync（同步直请求）/ auto（异步优先，404/405 时回退同步）
   openaiImageMode: (process.env.OPENAI_IMAGE_MODE || 'async') as 'async' | 'sync' | 'auto',
+  openaiImageSubmitTimeoutMs: Math.max(60_000, parseInt(process.env.OPENAI_IMAGE_SUBMIT_TIMEOUT_MS || '600000', 10)),
 
   // Storage
   storageDriver: process.env.STORAGE_DRIVER || 'local',

@@ -152,7 +152,7 @@ const imageWorker = new Worker(
       // 2. 提交异步生图任务（单外部依赖，包超时保护）
       const { taskId } = await withTimeout(
         imageService.submitJob(prompt, { model, size, n: count }),
-        60_000,
+        env.openaiImageSubmitTimeoutMs,
         '提交生图任务',
       )
 
