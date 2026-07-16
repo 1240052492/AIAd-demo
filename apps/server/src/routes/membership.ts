@@ -20,6 +20,10 @@ router.get('/mine', async (req: Request, res: Response) => {
   return ok(res, list)
 })
 
+router.get('/benefits', async (req: Request, res: Response) => {
+  return ok(res, await membershipService.getEffectiveBenefits(req.user!.id))
+})
+
 // 未接支付网关前禁止直接发放套餐积分，避免普通用户免费刷积分。
 router.post('/purchase', async (_req: Request, res: Response) => {
   return fail(res, 403, '会员购买尚未开放，请联系管理员')

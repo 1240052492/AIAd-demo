@@ -27,24 +27,32 @@ export function getAccessToken(): string | null {
  * 调用 /api/auth/refresh 用 httpOnly refresh cookie 换发新的 access token。
  * 成功返回新 token，失败（cookie 失效 / 未登录）返回 null。
  */
-async function refreshAccessToken(): Promise<string | null> {
-  try {
-    const res = await fetch(`${BASE_URL}/auth/refresh`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-    })
-    if (!res.ok) return null
-    const json = (await res.json()) as ApiResponse<{ token?: string; accessToken?: string }>
-    const token = json?.data?.token ?? json?.data?.accessToken
-    if (token) {
-      accessToken = token
-      return token
+let refreshPromise: Promise<string | null> | null = null
+
+export function refreshAccessToken(): Promise<string | null> {
+  if (refreshPromise) return refreshPromise
+  refreshPromise = (async () => {
+    try {
+      const res = await fetch(`${BASE_URL}/auth/refresh`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+      })
+      if (!res.ok) return null
+      const json = (await res.json()) as ApiResponse<{ token?: string; accessToken?: string }>
+      const token = json?.data?.token ?? json?.data?.accessToken
+      if (token) {
+        accessToken = token
+        return token
+      }
+      return null
+    } catch {
+      return null
+    } finally {
+      refreshPromise = null
     }
-    return null
-  } catch {
-    return null
-  }
+  })()
+  return refreshPromise
 }
 
 /** 统一跳转登录页并清理内存 token */

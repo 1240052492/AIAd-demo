@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import type { User, ApiResponse } from '@/types'
-import { authApi, creditApi, setAccessToken } from '@/services/api'
+import { authApi, creditApi, refreshAccessToken, setAccessToken } from '@/services/api'
 
 interface AuthState {
   user: User | null
@@ -49,15 +49,8 @@ export function restoreSession(): Promise<void> {
   restoreSessionPromise = (async () => {
     try {
       const base = import.meta.env.VITE_API_BASE_URL || '/api'
-      // 全程用原始 fetch，避免 request() 在恢复中途遇到 401 时强制跳 /login
-      const res = await fetch(`${base}/auth/refresh`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-      })
-      if (!res.ok) return
-      const json = (await res.json()) as ApiResponse<{ token?: string; accessToken?: string }>
-      const token = json?.data?.token ?? json?.data?.accessToken
+      // 与普通请求的 401 自愈共用同一个 refresh 单飞锁，避免两个入口并发旋转 Cookie。
+      const token = await refreshAccessToken()
       if (!token) return
       setAccessToken(token)
 

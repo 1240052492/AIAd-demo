@@ -10,6 +10,7 @@ import {
   ListChecks,
   LayoutGrid,
   ShieldAlert,
+  Ban,
   ArrowLeft,
   Receipt,
   Crown,
@@ -31,6 +32,7 @@ import { MembershipMgmtPanel } from './MembershipMgmt'
 import { RechargeMgmtPanel } from './RechargeMgmt'
 import { UserRolesPanel } from './UserRoles'
 import { CreditLedgerPanel } from './CreditLedger'
+import { ForbiddenWordsPanel } from './ForbiddenWords'
 
 export type TabKey =
   | 'overview'
@@ -45,6 +47,7 @@ export type TabKey =
   | 'roleconfig'
   | 'membership'
   | 'recharge'
+  | 'forbidden'
 
 const NAV: { key: TabKey; label: string; icon: React.ReactNode }[] = [
   { key: 'overview', label: '数据总览', icon: <LayoutDashboard size={17} /> },
@@ -54,6 +57,7 @@ const NAV: { key: TabKey; label: string; icon: React.ReactNode }[] = [
   { key: 'membership', label: '会员套餐', icon: <Crown size={17} /> },
   { key: 'recharge', label: '充值管理', icon: <HandCoins size={17} /> },
   { key: 'templates', label: '模板库', icon: <Library size={17} /> },
+  { key: 'forbidden', label: '违禁词库', icon: <Ban size={17} /> },
   { key: 'workflow', label: '工作流配置', icon: <Workflow size={17} /> },
   { key: 'providers', label: 'API 配置 / 模型服务', icon: <KeyRound size={17} /> },
   { key: 'queue', label: '生成任务队列', icon: <ListChecks size={17} /> },
@@ -259,6 +263,7 @@ export default function AdminPage() {
             {tab === 'roleconfig' && <RoleConfigPanel />}
             {tab === 'membership' && <MembershipMgmtPanel />}
             {tab === 'recharge' && <RechargeMgmtPanel />}
+            {tab === 'forbidden' && <ForbiddenWordsPanel />}
           </div>
         </main>
       </div>

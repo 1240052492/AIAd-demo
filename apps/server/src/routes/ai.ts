@@ -6,6 +6,7 @@ import { WorkflowEngine } from '../services/ai/workflow.engine'
 import { creditService } from '../services/credit.service'
 import { allowMockRequest, requireTextProvider } from '../services/capability.service'
 import { prisma } from '../config'
+import { forbiddenWordService } from '../services/forbidden-word.service'
 
 const router = Router()
 
@@ -54,6 +55,7 @@ router.post('/brief', requirePermission('canGenerate'), async (req: Request, res
         data: null,
       })
     }
+    const reviewedClientText = (await forbiddenWordService.review(safeClientText, 'clientText')).text
     // F14：constraints 会被拼接进 LLM prompt，做序列化长度限制，避免超大对象造成费用/体积攻击
     if (constraints !== undefined && constraints !== null) {
       let constraintsSize = 0
@@ -69,6 +71,7 @@ router.post('/brief', requirePermission('canGenerate'), async (req: Request, res
           data: null,
         })
       }
+      await forbiddenWordService.assertObjectAllowed(constraints, 'constraints')
     }
 
     // ── 离线演示模式（mock）────────────────────────────────────────────
@@ -117,7 +120,7 @@ router.post('/brief', requirePermission('canGenerate'), async (req: Request, res
     try {
       const result = await anthropic.generateBrief({
         businessType: businessType.trim(),
-        clientText: safeClientText,
+        clientText: reviewedClientText,
         constraints,
       })
       await creditService.consume(userId, 1, { reason: '生成广告 Brief', relatedType: 'ai_brief' })
@@ -161,6 +164,11 @@ router.post('/prompt', requirePermission('canGenerate'), async (req: Request, re
         data: null,
       })
     }
+    await forbiddenWordService.assertObjectAllowed(brief, 'brief')
+    const safeStylePreference =
+      typeof stylePreference === 'string'
+        ? (await forbiddenWordService.review(stylePreference, 'stylePreference')).text
+        : stylePreference
 
     // ── 离线演示模式（mock）────────────────────────────────────────────
     // 当请求体 mock === true 时跳过 AI 网关与积分冻结，直接返回多风格提示词示例。
@@ -192,7 +200,7 @@ router.post('/prompt', requirePermission('canGenerate'), async (req: Request, re
       return next(err)
     }
     try {
-      const result = await promptService.optimizePrompt(brief, stylePreference)
+      const result = await promptService.optimizePrompt(brief, safeStylePreference)
       await creditService.consume(userId, 1, { reason: '优化生图提示词', relatedType: 'ai_prompt' })
       return res.json({ code: 0, message: 'ok', data: result })
     } catch (innerErr) {
@@ -217,18 +225,28 @@ router.post('/workflows/run', requirePermission('canGenerate'), async (req: Requ
     if (!projectId || typeof projectId !== 'string' || !projectId.trim()) {
       return res.status(400).json({ code: 400, message: 'projectId 为必填项', data: null })
     }
-    // userInput 可选；若提供则做长度校验，超长直接拒绝（避免费用攻击）
+    // userInput 可选；空字符串/纯空白按未填写处理。
     let safeUserInput = ''
     if (userInput != null) {
-      const v = validateAiText(userInput, 'userInput')
-      if (!v) {
+      if (typeof userInput !== 'string') {
         return res.status(400).json({
           code: 400,
-          message: `userInput 长度不超过 ${MAX_AI_TEXT_LENGTH} 字符`,
+          message: '补充要求必须是文本',
           data: null,
         })
       }
-      safeUserInput = v
+      const trimmed = userInput.trim()
+      if (trimmed.length > MAX_AI_TEXT_LENGTH) {
+        return res.status(400).json({
+          code: 400,
+          message: `补充要求不能超过 ${MAX_AI_TEXT_LENGTH} 字符`,
+          data: null,
+        })
+      }
+      safeUserInput = trimmed
+    }
+    if (safeUserInput) {
+      safeUserInput = (await forbiddenWordService.review(safeUserInput, 'userInput')).text
     }
     const userId = req.user!.id
 

@@ -135,7 +135,7 @@ app.use((err: Error, _req: express.Request, res: express.Response, _next: expres
   const isDev = process.env.NODE_ENV === 'development'
   if (err instanceof AppError) {
     console.error(`[${err.name}]`, err.message)
-    res.status(err.status).json({ code: err.code, message: err.message, data: null })
+    res.status(err.status).json({ code: err.code, message: err.message, data: err.data ?? null })
     return
   }
   console.error('[Server Error]', err)

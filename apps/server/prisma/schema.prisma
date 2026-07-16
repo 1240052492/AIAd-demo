@@ -168,6 +168,22 @@ model SystemSetting {
   @@map("system_settings")
 }
 
+model ForbiddenWord {
+  id          String   @id @default(cuid())
+  word        String   @unique
+  category    String   @default("general")
+  matchType   String   @default("contains") @map("match_type") // contains / whole_word
+  action      String   @default("block") // block / flag / replace
+  replacement String?
+  enabled     Boolean  @default(true)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@index([enabled])
+  @@index([category])
+  @@map("forbidden_words")
+}
+
 // ============================================
 // 会员与充值（新增：解决"充值积分"链路缺失 + 会员套餐可配置）
 // 说明：新增表使用标量 userId（不挂 User 反向关系），避免改动 User 模型与关系校验。

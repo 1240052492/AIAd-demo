@@ -6,12 +6,21 @@ export class AppError extends Error {
   code: number
   /** HTTP 状态码 */
   status: number
+  data?: unknown
 
-  constructor(message: string, code = 400, status = 400) {
+  constructor(message: string, code = 400, status = 400, data?: unknown) {
     super(message)
     this.name = 'AppError'
     this.code = code
     this.status = status
+    this.data = data
+  }
+}
+
+export class ContentPolicyError extends AppError {
+  constructor(data: unknown, message = '内容包含不可使用的词语，请修改后重试') {
+    super(message, 42201, 422, data)
+    this.name = 'ContentPolicyError'
   }
 }
 

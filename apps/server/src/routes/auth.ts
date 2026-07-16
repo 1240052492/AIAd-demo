@@ -55,18 +55,28 @@ function signRefreshToken(userId: string, roles: string[]): { refreshToken: stri
 }
 
 /** 设置 httpOnly 刷新令牌 Cookie（手动设置 Set-Cookie，避免额外依赖） */
-function setRefreshCookie(res: import('express').Response, token: string): void {
-  const secure = env.nodeEnv === 'production' ? ' Secure;' : ''
-  const cookie = `refresh_token=${encodeURIComponent(token)}; HttpOnly;${secure} SameSite=Strict; Max-Age=${
+function refreshCookieOptions(req: import('express').Request): { secure: boolean; sameSite: 'Lax' | 'Strict' | 'None' } {
+  const configured = String(process.env.REFRESH_COOKIE_SAME_SITE || 'Lax').toLowerCase()
+  const sameSite = configured === 'none' ? 'None' : configured === 'strict' ? 'Strict' : 'Lax'
+  const forwardedProto = String(req.headers['x-forwarded-proto'] || '').split(',')[0]?.trim()
+  const secure = req.secure || forwardedProto === 'https' || sameSite === 'None'
+  return { secure, sameSite }
+}
+
+function setRefreshCookie(req: import('express').Request, res: import('express').Response, token: string): void {
+  const { secure, sameSite } = refreshCookieOptions(req)
+  const securePart = secure ? ' Secure;' : ''
+  const cookie = `refresh_token=${encodeURIComponent(token)}; HttpOnly;${securePart} SameSite=${sameSite}; Max-Age=${
     REFRESH_TOKEN_MAX_AGE_MS / 1000
   }; Path=/`
   res.setHeader('Set-Cookie', cookie)
 }
 
 /** 清除刷新令牌 Cookie */
-function clearRefreshCookie(res: import('express').Response): void {
-  const secure = env.nodeEnv === 'production' ? ' Secure;' : ''
-  const cookie = `refresh_token=; HttpOnly;${secure} SameSite=Strict; Max-Age=0; Path=/`
+function clearRefreshCookie(req: import('express').Request, res: import('express').Response): void {
+  const { secure, sameSite } = refreshCookieOptions(req)
+  const securePart = secure ? ' Secure;' : ''
+  const cookie = `refresh_token=; HttpOnly;${securePart} SameSite=${sameSite}; Max-Age=0; Path=/`
   res.setHeader('Set-Cookie', cookie)
 }
 
@@ -126,7 +136,7 @@ router.post('/register', async (req, res, next) => {
     const roles = ['user']
     const { accessToken, expiresIn } = signAccessToken(user.id, roles)
     const { refreshToken } = signRefreshToken(user.id, roles)
-    setRefreshCookie(res, refreshToken)
+    setRefreshCookie(req, res, refreshToken)
 
     const { passwordHash: _ph, ...safeUser } = user
     return ok(res, { token: accessToken, accessToken, expiresIn, user: safeUser }, '注册成功')
@@ -175,7 +185,7 @@ router.post('/login', async (req, res, next) => {
     const roles = user.roles.map((ur) => ur.role.code)
     const { accessToken, expiresIn } = signAccessToken(user.id, roles)
     const { refreshToken } = signRefreshToken(user.id, roles)
-    setRefreshCookie(res, refreshToken)
+    setRefreshCookie(req, res, refreshToken)
 
     const { passwordHash: _ph, ...safeUser } = user
     // 契约：{ accessToken, expiresIn }；额外保留 token 字段以兼容既有前端
@@ -220,7 +230,7 @@ router.post('/refresh', async (req, res, next) => {
 
     const { accessToken, expiresIn } = signAccessToken(userId, roles)
     const { refreshToken: newRefresh } = signRefreshToken(userId, roles)
-    setRefreshCookie(res, newRefresh)
+    setRefreshCookie(req, res, newRefresh)
 
     return ok(res, { accessToken, expiresIn })
   } catch (err) {
@@ -271,7 +281,7 @@ router.post('/logout', async (_req, res, next) => {
       }
     }
 
-    clearRefreshCookie(res)
+    clearRefreshCookie(_req, res)
     return ok(res, null, '已退出登录')
   } catch (err) {
     next(err)

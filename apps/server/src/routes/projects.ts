@@ -6,6 +6,7 @@ import { requireAuth, AuthRequest } from '../middleware/auth'
 import { ValidationError } from '../utils/errors'
 import { projectService } from '../services/project.service'
 import { nsfwCheckUpload } from '../middleware/content-review'
+import { forbiddenWordService } from '../services/forbidden-word.service'
 
 const router = Router()
 
@@ -44,6 +45,8 @@ router.post(
   '/',
   requireAuth,
   asyncHandler(async (req: AuthRequest, res: Response) => {
+    await forbiddenWordService.review(String(req.body.title || ''), 'title')
+    await forbiddenWordService.assertObjectAllowed(req.body.briefJson, 'briefJson')
     const project = await projectService.create(req.user!.id, {
       title: req.body.title,
       businessType: req.body.businessType,
@@ -68,6 +71,10 @@ router.patch(
   '/:id',
   requireAuth,
   asyncHandler(async (req: AuthRequest, res: Response) => {
+    if (req.body.title !== undefined) await forbiddenWordService.review(String(req.body.title), 'title')
+    if (req.body.briefJson !== undefined) {
+      await forbiddenWordService.assertObjectAllowed(req.body.briefJson, 'briefJson')
+    }
     const project = await projectService.update(req.params.id, req.user!.id, req.body)
     sendSuccess(res, project, '项目更新成功')
   }),

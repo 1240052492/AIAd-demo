@@ -11,6 +11,7 @@ import {
   MembershipPlan,
   PlanInput,
   RolePermissions,
+  MembershipBenefits,
 } from '@/services/admin-config.api'
 
 function toYuan(fen: number) {
@@ -321,10 +322,34 @@ function PlanForm({
           />
         </Field>
 
+        <Field label="会员权益参数">
+          <div className="grid grid-cols-1 gap-3 rounded-btn border border-border bg-bg/35 p-3 sm:grid-cols-3">
+            <BenefitNumber label="生图并发数" value={(form.permissions as MembershipBenefits).maxConcurrentGenerations ?? 1} min={1} max={20} onChange={(v) => set('permissions', { ...form.permissions, maxConcurrentGenerations: v })} />
+            <BenefitNumber label="队列优先级" value={(form.permissions as MembershipBenefits).queuePriority ?? 0} min={0} max={100} onChange={(v) => set('permissions', { ...form.permissions, queuePriority: v })} />
+            <BenefitNumber label="存储空间（GB）" value={(form.permissions as MembershipBenefits).storageGb ?? 1} min={1} max={10000} onChange={(v) => set('permissions', { ...form.permissions, storageGb: v })} />
+            {([
+              ['allowHd', '高清生成'],
+              ['allow4k', '4K 生成'],
+              ['removeWatermark', '去除水印'],
+              ['promptLibrary', '专享提示词库'],
+              ['workflowLibrary', '专享工作流库'],
+            ] as const).map(([key, label]) => (
+              <label key={key} className="flex h-10 items-center gap-2 rounded-btn border border-border px-3 text-sm text-text">
+                <input type="checkbox" checked={!!(form.permissions as MembershipBenefits)[key]} onChange={(e) => set('permissions', { ...form.permissions, [key]: e.target.checked })} />
+                {label}
+              </label>
+            ))}
+          </div>
+        </Field>
+
         {err && <p className="text-sm text-red">{err}</p>}
       </div>
     </Dialog>
   )
+}
+
+function BenefitNumber({ label, value, min, max, onChange }: { label: string; value: number; min: number; max: number; onChange: (value: number) => void }) {
+  return <label className="text-xs text-muted">{label}<input type="number" min={min} max={max} value={value} onChange={(e) => onChange(Number(e.target.value))} className="mt-1 h-9 w-full rounded-btn border border-border bg-panel px-3 text-sm text-text" /></label>
 }
 
 const inputCls =

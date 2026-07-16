@@ -55,6 +55,17 @@ export const membershipApi = {
   /** GET /api/membership/mine（需登录） */
   getMine: () => api.get<MyMembership[]>('/membership/mine'),
 
+  getBenefits: () => api.get<{
+    maxConcurrentGenerations: number
+    queuePriority: number
+    storageGb: number
+    removeWatermark: boolean
+    allowHd: boolean
+    allow4k: boolean
+    promptLibrary: boolean
+    workflowLibrary: boolean
+  }>('/membership/benefits'),
+
   /** POST /api/membership/purchase { planCode }（需登录） */
   purchasePlan: (planCode: string) =>
     api.post<PurchaseResult>('/membership/purchase', { planCode }),

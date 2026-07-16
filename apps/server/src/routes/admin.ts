@@ -12,6 +12,13 @@ import { adjustCreditsSchema } from '../utils/validation'
 import { membershipService } from '../services/membership.service'
 import { rechargeService } from '../services/recharge.service'
 import { roleConfigService } from '../services/role-config.service'
+import {
+  apiKeyStatus,
+  encryptedApiKeyStatus,
+  removeSecretFields,
+  withApiKey,
+} from '../services/provider-config.service'
+import { forbiddenWordService } from '../services/forbidden-word.service'
 
 const router = Router()
 
@@ -460,30 +467,29 @@ router.delete(
 )
 
 // ===== Provider 配置 =====
-// GET /api/admin/provider-configs （不含敏感 key）
+// GET /api/admin/provider-configs（仅返回 Key 脱敏状态）
 router.get(
   '/provider-configs',
   asyncHandler(async (_req: AuthRequest, res: Response) => {
     const configs = await prisma.aiProviderConfig.findMany({
       orderBy: [{ priority: 'asc' }, { createdAt: 'desc' }],
-      select: {
-        id: true,
-        provider: true,
-        displayName: true,
-        baseUrl: true,
-        model: true,
-        enabled: true,
-        priority: true,
-        configJson: true,
-        createdAt: true,
-        updatedAt: true,
-      },
     })
-    sendSuccess(res, configs)
+    sendSuccess(
+      res,
+      configs.map(({ configJson, ...config }) => ({
+        ...config,
+        configJson: removeSecretFields(configJson),
+        ...encryptedApiKeyStatus(
+          configJson && typeof configJson === 'object'
+            ? (configJson as Record<string, unknown>).apiKeyEncrypted
+            : undefined,
+        ),
+      })),
+    )
   }),
 )
 
-// POST /api/admin/provider-configs （创建供应商配置；敏感 key 仍禁止写入数据库）
+// POST /api/admin/provider-configs
 router.post(
   '/provider-configs',
   asyncHandler(async (req: AuthRequest, res: Response) => {
@@ -493,6 +499,7 @@ router.post(
     if (!displayName) throw new ValidationError('显示名称不能为空')
     const existing = await prisma.aiProviderConfig.findFirst({ where: { provider } })
     if (existing) throw new ValidationError(`供应商 ${provider} 已存在，请直接编辑现有配置`)
+    const apiKey = String(req.body?.apiKey ?? req.body?.api_key ?? '').trim()
     const cfg = await prisma.aiProviderConfig.create({
       data: {
         provider,
@@ -501,10 +508,11 @@ router.post(
         model: String(req.body?.model || '').trim(),
         enabled: req.body?.enabled !== false,
         priority: Number.isFinite(Number(req.body?.priority)) ? Number(req.body.priority) : 0,
-        configJson: req.body?.configJson ?? undefined,
+        configJson: withApiKey(req.body?.configJson, apiKey) as any,
       },
     })
-    sendSuccess(res, cfg, 'Provider 配置已创建')
+    const { configJson, ...safeCfg } = cfg
+    sendSuccess(res, { ...safeCfg, configJson: removeSecretFields(configJson), ...apiKeyStatus(apiKey) }, 'Provider 配置已创建')
   }),
 )
 
@@ -524,11 +532,20 @@ router.patch(
     if (req.body.baseUrl !== undefined) updatable.baseUrl = req.body.baseUrl
     if (req.body.model !== undefined) updatable.model = req.body.model
     if (req.body.configJson !== undefined) updatable.configJson = req.body.configJson
+    const apiKey = String(req.body?.apiKey ?? req.body?.api_key ?? '').trim()
+    if (apiKey) {
+      const current = await prisma.aiProviderConfig.findUnique({
+        where: { id: req.params.id },
+        select: { configJson: true },
+      })
+      updatable.configJson = withApiKey(req.body.configJson ?? current?.configJson, apiKey)
+    }
     const cfg = await prisma.aiProviderConfig.update({
       where: { id: req.params.id },
       data: updatable,
     })
-    sendSuccess(res, cfg, 'Provider 配置已更新')
+    const { configJson, ...safeCfg } = cfg
+    sendSuccess(res, { ...safeCfg, configJson: removeSecretFields(configJson), ...encryptedApiKeyStatus(configJson && typeof configJson === 'object' ? (configJson as Record<string, unknown>).apiKeyEncrypted : undefined) }, 'Provider 配置已更新')
   }),
 )
 
@@ -540,6 +557,36 @@ router.delete(
     if (!existing) throw new NotFoundError('Provider 配置不存在')
     await prisma.aiProviderConfig.delete({ where: { id: req.params.id } })
     sendSuccess(res, { id: req.params.id }, 'Provider 配置已删除')
+  }),
+)
+
+// ===== 违禁词库 =====
+router.get(
+  '/forbidden-words',
+  asyncHandler(async (_req: AuthRequest, res: Response) => {
+    sendSuccess(res, await forbiddenWordService.list())
+  }),
+)
+
+router.post(
+  '/forbidden-words',
+  asyncHandler(async (req: AuthRequest, res: Response) => {
+    sendSuccess(res, await forbiddenWordService.create(req.body ?? {}), '违禁词已创建')
+  }),
+)
+
+router.patch(
+  '/forbidden-words/:id',
+  asyncHandler(async (req: AuthRequest, res: Response) => {
+    sendSuccess(res, await forbiddenWordService.update(req.params.id, req.body ?? {}), '违禁词已更新')
+  }),
+)
+
+router.delete(
+  '/forbidden-words/:id',
+  asyncHandler(async (req: AuthRequest, res: Response) => {
+    await forbiddenWordService.delete(req.params.id)
+    sendSuccess(res, { id: req.params.id }, '违禁词已删除')
   }),
 )
 

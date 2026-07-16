@@ -1,5 +1,6 @@
 import { env, prisma } from '../config'
 import { AppError } from '../utils/errors'
+import { getOpenAIImageProviderConfig } from './provider-config.service'
 
 export interface ProviderCapabilities {
   mock: boolean
@@ -22,10 +23,11 @@ async function enabledProviders(): Promise<Set<string>> {
 
 export async function getProviderCapabilities(): Promise<ProviderCapabilities> {
   const providers = await enabledProviders()
+  const imageProvider = await getOpenAIImageProviderConfig()
   return {
     mock: isMockEnabled(),
     textGeneration: Boolean(env.anthropicApiKey) && providers.has('anthropic'),
-    imageGeneration: Boolean(env.openaiImageApiKey) && providers.has('openai_image'),
+    imageGeneration: Boolean(imageProvider.apiKey) && imageProvider.enabled && providers.has('openai_image'),
     composition: true,
   }
 }

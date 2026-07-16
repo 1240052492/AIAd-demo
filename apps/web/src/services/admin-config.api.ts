@@ -47,6 +47,17 @@ export interface RolePermissions {
   canTeam: boolean
 }
 
+export interface MembershipBenefits extends RolePermissions {
+  maxConcurrentGenerations?: number
+  queuePriority?: number
+  storageGb?: number
+  removeWatermark?: boolean
+  allowHd?: boolean
+  allow4k?: boolean
+  promptLibrary?: boolean
+  workflowLibrary?: boolean
+}
+
 export interface RoleConfig {
   roleCode: RoleCode
   rate: number
@@ -64,13 +75,27 @@ export interface MembershipPlan {
   durationDays: number
   /** 积分消耗折扣系数（1 = 原价，0.7 = 7 折） */
   rate: number
-  permissions: RolePermissions
+  permissions: MembershipBenefits
   isActive: boolean
   sortOrder: number
 }
 
 /** 创建 / 编辑套餐的入参（不含 id） */
 export type PlanInput = Omit<MembershipPlan, 'id'>
+
+export interface ForbiddenWord {
+  id: string
+  word: string
+  category: string
+  matchType: 'contains' | 'whole_word'
+  action: 'block' | 'flag' | 'replace'
+  replacement?: string | null
+  enabled: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+export type ForbiddenWordInput = Omit<ForbiddenWord, 'id' | 'createdAt' | 'updatedAt'>
 
 export type RechargeStatus = 'pending' | 'paid' | 'failed' | 'refunded' | 'canceled'
 
@@ -303,6 +328,15 @@ export const adminConfigApi = {
     adminRequest<ProviderConfig>('PATCH', `/admin/provider-configs/${id}`, data),
   deleteProviderConfig: (id: string) =>
     adminRequest<{ id: string }>('DELETE', `/admin/provider-configs/${id}`),
+
+  // ---- 违禁词库 ----
+  getForbiddenWords: () => adminRequest<ForbiddenWord[]>('GET', '/admin/forbidden-words'),
+  createForbiddenWord: (data: ForbiddenWordInput) =>
+    adminRequest<ForbiddenWord>('POST', '/admin/forbidden-words', data),
+  updateForbiddenWord: (id: string, data: Partial<ForbiddenWordInput>) =>
+    adminRequest<ForbiddenWord>('PATCH', `/admin/forbidden-words/${id}`, data),
+  deleteForbiddenWord: (id: string) =>
+    adminRequest<{ id: string }>('DELETE', `/admin/forbidden-words/${id}`),
 
   // ---- 积分规则 ----
   getCreditRules: () => adminRequest<CreditRules>('GET', '/admin/credit-rules'),

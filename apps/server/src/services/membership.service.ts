@@ -38,6 +38,9 @@ export class MembershipService {
     if (!code || !/^[a-z0-9_]+$/.test(code)) {
       throw new ValidationError('套餐编码非法（仅限小写字母、数字、下划线）')
     }
+    if (rest.permissions !== undefined) {
+      rest.permissions = this.normalizePermissions(rest.permissions)
+    }
     if (id) {
       const existing = await prisma.membershipPlan.findUnique({ where: { id } })
       if (!existing) throw new NotFoundError('会员套餐不存在')
@@ -46,6 +49,29 @@ export class MembershipService {
     const existingCode = await prisma.membershipPlan.findUnique({ where: { code } })
     if (existingCode) throw new ValidationError('套餐编码已存在')
     return prisma.membershipPlan.create({ data: { code, ...rest } as any })
+  }
+
+  private normalizePermissions(value: unknown): Record<string, unknown> {
+    const input = value && typeof value === 'object' && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : {}
+    const output: Record<string, unknown> = {}
+    const booleans = [
+      'canGenerate', 'canCompose', 'canAccessAdmin', 'canRecharge', 'canManageUsers',
+      'canExport', 'canPriority', 'canTeam', 'removeWatermark', 'allowHd', 'allow4k',
+      'promptLibrary', 'workflowLibrary',
+    ]
+    for (const key of booleans) output[key] = input[key] === true
+    const ranges: Record<string, [number, number, number]> = {
+      maxConcurrentGenerations: [1, 20, 1],
+      queuePriority: [0, 100, 0],
+      storageGb: [1, 10000, 1],
+    }
+    for (const [key, [min, max, fallback]] of Object.entries(ranges)) {
+      const raw = Number(input[key])
+      output[key] = Number.isFinite(raw) ? Math.min(max, Math.max(min, Math.floor(raw))) : fallback
+    }
+    return output
   }
 
   async deletePlan(id: string) {
@@ -67,6 +93,34 @@ export class MembershipService {
       include: { plan: true },
       orderBy: { startedAt: 'desc' },
     })
+  }
+
+  async getEffectiveBenefits(userId: string): Promise<Record<string, unknown>> {
+    const memberships = await this.getUserMemberships(userId)
+    const result: Record<string, unknown> = {
+      maxConcurrentGenerations: 1,
+      queuePriority: 0,
+      storageGb: 1,
+      removeWatermark: false,
+      allowHd: false,
+      allow4k: false,
+      promptLibrary: false,
+      workflowLibrary: false,
+    }
+    for (const membership of memberships) {
+      const permissions = membership.plan.permissions && typeof membership.plan.permissions === 'object'
+        ? (membership.plan.permissions as Record<string, unknown>)
+        : {}
+      for (const key of ['maxConcurrentGenerations', 'queuePriority', 'storageGb']) {
+        const current = Number(result[key] || 0)
+        const next = Number(permissions[key] || 0)
+        if (Number.isFinite(next)) result[key] = Math.max(current, next)
+      }
+      for (const key of ['removeWatermark', 'allowHd', 'allow4k', 'promptLibrary', 'workflowLibrary']) {
+        result[key] = result[key] === true || permissions[key] === true
+      }
+    }
+    return result
   }
 
   /**

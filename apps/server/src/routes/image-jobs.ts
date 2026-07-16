@@ -9,6 +9,9 @@ import { textCorrectionService } from '../services/ai/text-correction.service'
 import { saveBuffer } from '../utils/storage'
 import { allowMockRequest, requireImageProvider } from '../services/capability.service'
 import { enqueueCreditCompensation } from '../workers/credit-compensation'
+import { forbiddenWordService } from '../services/forbidden-word.service'
+import { membershipService } from '../services/membership.service'
+import { AppError } from '../utils/errors'
 
 const router = Router()
 
@@ -104,7 +107,7 @@ router.post('/', requirePermission('canGenerate'), async (req: Request, res: Res
       return res.status(400).json({ code: 400, message: 'prompt 为必填项', data: null })
     }
     // 防御性长度校验：超长直接拒绝
-    const safePrompt = prompt.trim()
+    let safePrompt = prompt.trim()
     if (safePrompt.length > MAX_PROMPT_LENGTH) {
       return res.status(400).json({
         code: 400,
@@ -112,7 +115,20 @@ router.post('/', requirePermission('canGenerate'), async (req: Request, res: Res
         data: null,
       })
     }
+    safePrompt = (await forbiddenWordService.review(safePrompt, 'prompt')).text
+    await forbiddenWordService.assertObjectAllowed(req.body?.requiredVisibleTexts, 'requiredVisibleTexts')
     const userId = req.user!.id
+    const mock = allowMockRequest(req.body?.mock)
+    const benefits = mock ? { queuePriority: 0 } : await membershipService.getEffectiveBenefits(userId)
+    if (!mock) {
+      const maxConcurrent = Math.max(1, Number(benefits.maxConcurrentGenerations || 1))
+      const activeJobs = await prisma.generationJob.count({
+        where: { userId, jobType: 'image_generation', status: { in: ['queued', 'processing'] } },
+      })
+      if (activeJobs >= maxConcurrent) {
+        throw new AppError(`当前套餐最多同时运行 ${maxConcurrent} 个生图任务`, 429, 429)
+      }
+    }
 
     // 归属校验：若提供了 projectId，必须属于当前用户，否则写 IDOR（可把生成资产写入他人项目）
     if (projectId) {
@@ -127,7 +143,6 @@ router.post('/', requirePermission('canGenerate'), async (req: Request, res: Res
     const imageCreditCost = await creditRuleService.getCost('imageGeneration')
     // 生产护栏：仅当显式设置 ALLOW_MOCK=true 时才允许 mock 短路；
     // 否则即使请求体携带 mock:true 也强制走真实生图路径（生产永不可被 mock）。
-    const mock = allowMockRequest(req.body?.mock)
     const creditCost = mock ? 0 : n * imageCreditCost
     // 生成消耗按积分规则标准扣减；代理 0.7 仅用于充值付款金额，不影响消费积分。
     const requiredVisibleTexts = normalizeRequiredVisibleTexts(req.body?.requiredVisibleTexts)
@@ -207,6 +222,8 @@ router.post('/', requirePermission('canGenerate'), async (req: Request, res: Res
         ratio,
         size,
         creditsFrozen: creditCost,
+      }, {
+        priority: Math.max(1, 100 - Math.min(99, Number(benefits.queuePriority || 0))),
       })
     } catch (err) {
       await prisma.generationJob

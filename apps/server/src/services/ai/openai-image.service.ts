@@ -1,5 +1,6 @@
 import { randomUUID } from 'crypto'
 import { env, redisConnection } from '../../config'
+import { getOpenAIImageProviderConfig } from '../provider-config.service'
 
 /**
  * 生图提交参数
@@ -61,12 +62,8 @@ function sleep(ms: number): Promise<void> {
 export class OpenAIImageService {
   /** 生图网关 baseURL（去掉结尾斜杠） */
   private baseURL: string
-  private apiKey: string
-
   constructor() {
-    // 图片请求严格走 OPENAI_IMAGE_* 配置，不回退 OPENAI_*（与文本通道 ANTHROPIC_* 完全隔离）。
-    this.apiKey = env.openaiImageApiKey
-    this.baseURL = (env.openaiImageBaseUrl || '').replace(/\/+$/, '')
+    this.baseURL = ''
   }
 
   /** 当前生图模式（默认 sync：同步为主） */
@@ -95,7 +92,11 @@ export class OpenAIImageService {
    * @returns 任务 ID（带协议前缀，供 pollStatus 轮询）
    */
   async submitJob(prompt: string, options: SubmitJobOptions = {}): Promise<{ taskId: string }> {
-    const model = options.model || env.openaiImageModel
+    const provider = await getOpenAIImageProviderConfig()
+    if (!provider.enabled) throw new Error('生图 Provider 已停用，请联系管理员')
+    this.apiKey = provider.apiKey
+    this.baseURL = (provider.baseUrl || '').replace(/\/+$/, '')
+    const model = options.model || provider.model
     const size = options.size || '1024x1024'
     const n = Math.min(Math.max(options.n ?? 1, 1), 4)
 
@@ -111,6 +112,8 @@ export class OpenAIImageService {
    * 结果写入 Redis 缓存并返回 sync- 前缀 taskId，pollStatus 命中缓存即刻返回成功。
    * 手写 fetch（非 SDK）：body 可自由携带 response_format，请求头也不含 SDK 遥测头（规避网关 WAF）。
    */
+  private apiKey = ''
+
   private async submitSync(
     prompt: string,
     opts: { model: string; size: string; n: number },
